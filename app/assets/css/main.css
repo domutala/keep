@@ -1,0 +1,211 @@
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes: false;
+  logs: false;
+}
+
+@plugin "daisyui/theme" {
+  name: "keep";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: #ffffff;
+  --color-base-200: #f8f7f4;
+  --color-base-300: #e7e3dc;
+  --color-base-content: #262521;
+  --color-primary: #fbd35c;
+  --color-primary-content: #262521;
+  --color-secondary: #fff1b8;
+  --color-secondary-content: #9f5d17;
+  --color-accent: #e9a923;
+  --color-accent-content: #262521;
+  --color-neutral: #77736b;
+  --color-neutral-content: #ffffff;
+  --color-info: #60a5fa;
+  --color-info-content: #172554;
+  --color-success: #4ade80;
+  --color-success-content: #052e16;
+  --color-warning: #facc15;
+  --color-warning-content: #422006;
+  --color-error: #ef4444;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 9999px;
+  --radius-field: 9999px;
+  --radius-box: 1.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@theme {
+  --font-sans: "Inter", "Avenir Next", "Segoe UI", sans-serif;
+
+  --color-canvas: #f8f7f4;
+  --color-surface: #ffffff;
+  --color-ink: #262521;
+  --color-muted: #77736b;
+  --color-line: #e7e3dc;
+  --color-brand-50: #fff9df;
+  --color-brand-100: #fff1b8;
+  --color-brand-200: #ffe585;
+  --color-brand-300: #fbd35c;
+  --color-brand-400: #f5bd3b;
+  --color-brand-500: #e9a923;
+  --color-brand-600: #c98216;
+  --color-brand-700: #9f5d17;
+
+  --shadow-card:
+    0 1px 2px rgb(38 37 33 / 0.04), 0 8px 24px rgb(38 37 33 / 0.06);
+  --shadow-float: 0 12px 36px rgb(38 37 33 / 0.12);
+
+  --radius-card: 0.5rem;
+}
+
+@layer base {
+  :root {
+    color: var(--color-ink);
+    background: var(--color-canvas);
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    min-width: 320px;
+    background: var(--color-canvas);
+  }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+    background:
+      radial-gradient(
+        circle at 8% 0%,
+        rgb(255 241 184 / 0.42),
+        transparent 24rem
+      ),
+      var(--color-canvas);
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  ::selection {
+    color: var(--color-ink);
+    background: var(--color-brand-200);
+  }
+
+  :focus-visible {
+    outline: 3px solid rgb(233 169 35 / 0.4);
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .editor-tool {
+    @apply grid size-8 place-items-center rounded-lg text-muted transition hover:bg-surface hover:text-ink disabled:cursor-not-allowed disabled:opacity-35;
+  }
+
+  .editor-tool-active {
+    @apply bg-brand-100 text-brand-700;
+  }
+
+  .tiptap {
+    @apply min-h-36 px-5 py-4 text-sm leading-6 outline-none;
+  }
+
+  .tiptap p.is-editor-empty:first-child::before {
+    color: color-mix(in srgb, var(--color-muted) 70%, transparent);
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .tiptap h2,
+  .note-content h2 {
+    @apply mt-3 mb-1 text-lg font-semibold leading-7 first:mt-0;
+  }
+
+  .tiptap p,
+  .note-content p {
+    @apply my-1;
+  }
+
+  .tiptap ul,
+  .note-content ul {
+    @apply my-2 list-disc pl-5;
+  }
+
+  .tiptap ol,
+  .note-content ol {
+    @apply my-2 list-decimal pl-5;
+  }
+
+  .tiptap ul[data-type="taskList"],
+  .note-content ul[data-type="taskList"] {
+    @apply my-2 list-none p-0;
+  }
+
+  .tiptap ul[data-type="taskList"] li,
+  .note-content ul[data-type="taskList"] li {
+    @apply my-1 flex items-start gap-2;
+  }
+
+  .tiptap ul[data-type="taskList"] li > label,
+  .note-content ul[data-type="taskList"] li > label {
+    @apply mt-1 flex shrink-0 items-center;
+  }
+
+  .tiptap ul[data-type="taskList"] li > div,
+  .note-content ul[data-type="taskList"] li > div {
+    @apply min-w-0 flex-1;
+  }
+
+  .tiptap ul[data-type="taskList"] li > div > p,
+  .note-content ul[data-type="taskList"] li > div > p {
+    @apply my-0;
+  }
+
+  .tiptap ul[data-type="taskList"] input[type="checkbox"],
+  .note-content ul[data-type="taskList"] input[type="checkbox"] {
+    @apply size-4 rounded border-line;
+    accent-color: var(--color-brand-500);
+  }
+
+  .note-content ul[data-type="taskList"] input[type="checkbox"] {
+    pointer-events: none;
+  }
+
+  .tiptap li[data-checked="true"] > div,
+  .note-content li[data-checked="true"] > div {
+    @apply text-muted line-through;
+  }
+
+  .tiptap blockquote,
+  .note-content blockquote {
+    @apply my-2 border-l-2 border-brand-300 pl-3 text-muted;
+  }
+
+  .tiptap code,
+  .note-content code {
+    @apply rounded bg-canvas px-1 py-0.5 text-[0.9em];
+  }
+}
