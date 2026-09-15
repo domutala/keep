@@ -41,6 +41,11 @@ interface SessionQuery {
   sessionId?: string;
 }
 
+interface MergeSessionsBody {
+  targetSessionId?: string;
+  sourceSessionId?: string;
+}
+
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -138,6 +143,52 @@ app.put<{ Querystring: SessionQuery; Body: StoredState }>(
     const results = await sql.transaction(queries);
     const revisionRows = results.at(-1) as Array<{ revision: string | number }>;
     return { revision: Number(revisionRows[0]?.revision ?? 0) };
+  },
+);
+
+app.post<{ Body: MergeSessionsBody }>(
+  "/api/state/merge",
+  async (request, reply) => {
+    const { targetSessionId, sourceSessionId } = request.body ?? {};
+    if (
+      !validSessionId(targetSessionId) ||
+      !validSessionId(sourceSessionId) ||
+      targetSessionId === sourceSessionId
+    ) {
+      return reply.code(400).send({ error: "Invalid session IDs" });
+    }
+
+    const sourceRows = await sql`
+      SELECT 1 FROM keep_sessions WHERE session_id = ${sourceSessionId}
+    `;
+    if (!sourceRows.length) {
+      return reply.code(404).send({ error: "Source session not found" });
+    }
+
+    await sql.transaction([
+      sql`INSERT INTO keep_sessions (session_id) VALUES (${targetSessionId}) ON CONFLICT (session_id) DO NOTHING`,
+      sql`
+        INSERT INTO keep_folders (session_id, id, payload, created_at)
+        SELECT ${targetSessionId}, id, payload, created_at
+        FROM keep_folders
+        WHERE session_id = ${sourceSessionId}
+        ON CONFLICT (session_id, id) DO NOTHING
+      `,
+      sql`
+        INSERT INTO keep_notes (session_id, id, payload, created_at)
+        SELECT ${targetSessionId}, id, payload, created_at
+        FROM keep_notes
+        WHERE session_id = ${sourceSessionId}
+        ON CONFLICT (session_id, id) DO NOTHING
+      `,
+      sql`
+        UPDATE keep_sessions
+        SET revision = revision + 1, updated_at = now()
+        WHERE session_id = ${targetSessionId}
+      `,
+    ]);
+
+    return readState(targetSessionId);
   },
 );
 

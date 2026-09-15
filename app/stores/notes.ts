@@ -42,11 +42,19 @@ interface RemoteState {
 let syncTimer: ReturnType<typeof setTimeout> | undefined;
 let stateEvents: EventSource | undefined;
 let lastRevision = 0;
+const sessionIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function browserSessionId() {
   const storageKey = "keep-session-id";
+  const sharedId = new URL(window.location.href).searchParams.get("session");
+  if (sharedId && sessionIdPattern.test(sharedId)) {
+    localStorage.setItem(storageKey, sharedId);
+    return sharedId;
+  }
+
   const storedId = localStorage.getItem(storageKey);
-  if (storedId) return storedId;
+  if (storedId && sessionIdPattern.test(storedId)) return storedId;
 
   const sessionId = crypto.randomUUID();
   localStorage.setItem(storageKey, sessionId);
@@ -63,6 +71,15 @@ export const useNotesStore = defineStore("notes", {
   }),
 
   actions: {
+    sessionShareUrl() {
+      if (typeof window === "undefined") return "";
+      this.sessionId ||= browserSessionId();
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("session", this.sessionId);
+      return url.toString();
+    },
+
     saveNote(input: CreateNoteInput, noteId?: string) {
       const title = input.title?.trim() ?? "";
       const contentText = input.contentText.trim();
@@ -262,6 +279,43 @@ export const useNotesStore = defineStore("notes", {
         this.syncError =
           error instanceof Error ? error.message : "Database loading failed";
       }
+    },
+
+    async mergeSession(sourceSessionId: string) {
+      if (typeof window === "undefined") return;
+      const normalizedId = sourceSessionId.trim();
+      this.sessionId ||= browserSessionId();
+
+      if (!sessionIdPattern.test(normalizedId)) {
+        throw new Error("L’identifiant de session est invalide.");
+      }
+      if (normalizedId === this.sessionId) {
+        throw new Error("Cette session est déjà la session courante.");
+      }
+
+      await this.syncToDatabase();
+      const response = await fetch("/api/state/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetSessionId: this.sessionId,
+          sourceSessionId: normalizedId,
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error("La session à fusionner est introuvable.");
+        }
+        throw new Error(`La fusion a échoué (${response.status}).`);
+      }
+
+      const state = (await response.json()) as RemoteState;
+      lastRevision = state.revision;
+      this.notes = state.notes;
+      this.folders = state.folders;
+      this.syncStatus = "synced";
+      return state;
     },
   },
 

@@ -21,6 +21,13 @@ const title = ref("");
 const contentHtml = ref("");
 const contentText = ref("");
 const search = ref("");
+const isShareModalOpen = ref(false);
+const shareUrl = ref("");
+const copiedShareValue = ref<"link" | "session" | null>(null);
+const shareError = ref("");
+const mergeSessionId = ref("");
+const mergeState = ref<"idle" | "merging" | "success" | "error">("idle");
+const mergeError = ref("");
 const selectedFolder = computed({
   get() {
     if (route.path === "/unfiled") return "unfiled";
@@ -29,16 +36,22 @@ const selectedFolder = computed({
     return typeof folderId === "string" ? folderId : "all";
   },
   set(folderId: string) {
+    const session = notesStore.sessionId || route.query.session;
+    const query = session ? { session: String(session) } : undefined;
+
     if (folderId === "all") {
-      void router.push("/");
+      void router.push({ path: "/", query });
       return;
     }
     if (folderId === "unfiled") {
-      void router.push("/unfiled");
+      void router.push({ path: "/unfiled", query });
       return;
     }
 
-    void router.push(`/folders/${encodeURIComponent(folderId)}`);
+    void router.push({
+      path: `/folders/${encodeURIComponent(folderId)}`,
+      query,
+    });
   },
 });
 const noteFolderId = ref<string | null>(null);
@@ -53,6 +66,50 @@ const newFolderName = ref("");
 const newFolderParentId = ref<string | null>(null);
 const saveState = ref<"idle" | "saving" | "saved">("idle");
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+function openShareModal() {
+  shareUrl.value = notesStore.sessionShareUrl();
+  copiedShareValue.value = null;
+  shareError.value = "";
+  mergeState.value = "idle";
+  mergeError.value = "";
+  isShareModalOpen.value = true;
+}
+
+function closeShareModal() {
+  isShareModalOpen.value = false;
+  copiedShareValue.value = null;
+  shareError.value = "";
+  mergeSessionId.value = "";
+  mergeState.value = "idle";
+  mergeError.value = "";
+}
+
+async function copyShareValue(kind: "link" | "session", value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    copiedShareValue.value = kind;
+    shareError.value = "";
+  } catch {
+    shareError.value =
+      "La copie a échoué. Sélectionnez la valeur manuellement.";
+  }
+}
+
+async function mergeSession() {
+  mergeState.value = "merging";
+  mergeError.value = "";
+
+  try {
+    await notesStore.mergeSession(mergeSessionId.value);
+    mergeSessionId.value = "";
+    mergeState.value = "success";
+  } catch (error) {
+    mergeState.value = "error";
+    mergeError.value =
+      error instanceof Error ? error.message : "La fusion a échoué.";
+  }
+}
 
 const filteredNotes = computed(() => {
   const query = search.value.trim().toLocaleLowerCase("fr");
@@ -376,7 +433,7 @@ onBeforeUnmount(saveDraft);
     </div>
 
     <label
-      class="relative hidden w-full max-w-md sm:block bg-surface border-transparent focus-within:border-brand-400 border rounded-lg"
+      class="relative hidden w-full max-w-md sm:block bg-surface border-transparent focus-within:border-brand-400 border rounded-lg mr-auto"
     >
       <span class="sr-only">Rechercher dans les notes</span>
       <Icon
@@ -391,6 +448,17 @@ onBeforeUnmount(saveDraft);
         type="search"
       />
     </label>
+
+    <button
+      class="btn btn-ghost btn-sm ml-2"
+      type="button"
+      title="Partager cette session"
+      aria-label="Partager cette session"
+      @click="openShareModal"
+    >
+      <UIcon name="lucide:cloud-backup" class="size-4" aria-hidden="true" />
+      <span class="hidden md:inline">Session</span>
+    </button>
   </nav>
 
   <main class="mx-auto max-w-[1580px] px-4 py-10 sm:px-6 sm:py-14">
@@ -531,6 +599,136 @@ onBeforeUnmount(saveDraft);
       </p>
     </section>
   </main>
+
+  <AppModal
+    :open="isShareModalOpen"
+    title="Partager cette session"
+    size="lg"
+    elevated
+    @close="closeShareModal"
+  >
+    <p class="mb-5 text-sm leading-6 text-base-content/70">
+      Utilisez le lien sur un autre appareil ou saisissez directement
+      l’identifiant de session.
+    </p>
+
+    <div class="space-y-5">
+      <div>
+        <label class="mb-1.5 block text-sm font-medium" for="share-link">
+          Lien de partage
+        </label>
+        <div class="join flex w-full">
+          <input
+            id="share-link"
+            class="input input-bordered join-item min-w-0 flex-1"
+            :value="shareUrl"
+            readonly
+            @focus="$event.currentTarget.select()"
+          />
+          <button
+            class="btn btn-primary join-item"
+            type="button"
+            @click="copyShareValue('link', shareUrl)"
+          >
+            <UIcon
+              :name="
+                copiedShareValue === 'link' ? 'lucide:check' : 'lucide:copy'
+              "
+              class="size-4"
+              aria-hidden="true"
+            />
+            {{ copiedShareValue === "link" ? "Copié" : "Copier" }}
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <label class="mb-1.5 block text-sm font-medium" for="share-session-id">
+          Identifiant de session
+        </label>
+        <div class="join flex w-full">
+          <input
+            id="share-session-id"
+            class="input input-bordered join-item min-w-0 flex-1 font-mono text-xs"
+            :value="notesStore.sessionId"
+            readonly
+            @focus="$event.currentTarget.select()"
+          />
+          <button
+            class="btn btn-outline join-item"
+            type="button"
+            @click="copyShareValue('session', notesStore.sessionId)"
+          >
+            <UIcon
+              :name="
+                copiedShareValue === 'session' ? 'lucide:check' : 'lucide:copy'
+              "
+              class="size-4"
+              aria-hidden="true"
+            />
+            {{ copiedShareValue === "session" ? "Copié" : "Copier" }}
+          </button>
+        </div>
+      </div>
+
+      <div class="divider text-xs text-base-content/50">Fusionner</div>
+
+      <form @submit.prevent="mergeSession">
+        <label class="mb-1.5 block text-sm font-medium" for="merge-session-id">
+          Session à fusionner
+        </label>
+        <p class="mb-3 text-xs leading-5 text-base-content/60">
+          Les notes et dossiers de cette session seront ajoutés à la session
+          courante. La session source restera intacte.
+        </p>
+        <div class="flex flex-col gap-2 sm:flex-row">
+          <input
+            id="merge-session-id"
+            v-model="mergeSessionId"
+            class="input input-bordered min-w-0 flex-1 font-mono text-xs"
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            autocomplete="off"
+          />
+          <button
+            class="btn btn-secondary"
+            type="submit"
+            :disabled="!mergeSessionId.trim() || mergeState === 'merging'"
+          >
+            <span
+              v-if="mergeState === 'merging'"
+              class="loading loading-spinner loading-xs"
+              aria-hidden="true"
+            />
+            <UIcon
+              v-else
+              name="lucide:merge"
+              class="size-4"
+              aria-hidden="true"
+            />
+            {{ mergeState === "merging" ? "Fusion…" : "Fusionner" }}
+          </button>
+        </div>
+        <p
+          v-if="mergeState === 'success'"
+          class="mt-3 text-sm text-success"
+          role="status"
+        >
+          Les deux sessions ont été fusionnées.
+        </p>
+        <p v-if="mergeError" class="mt-3 text-sm text-error" role="alert">
+          {{ mergeError }}
+        </p>
+      </form>
+    </div>
+
+    <p v-if="shareError" class="mt-4 text-sm text-error" role="alert">
+      {{ shareError }}
+    </p>
+
+    <template #actions>
+      <button class="btn" type="button" @click="closeShareModal">Fermer</button>
+    </template>
+  </AppModal>
 
   <AppModal
     :open="isComposerOpen && isEditingExistingNote"
