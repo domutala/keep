@@ -35,6 +35,8 @@ const route = useRoute();
 const router = useRouter();
 const runtime = useRuntime();
 const appName = computed(() => runtime.public.appName || "Keep");
+const { theme, initializeTheme, toggleTheme } = useTheme();
+initializeTheme();
 
 const isComposerOpen = ref(false);
 const title = ref("");
@@ -727,7 +729,7 @@ onBeforeUnmount(saveDraft);
 
 <template>
   <nav
-    class="sticky top-0 z-10 flex h-16 w-full items-center gap-2 bg-background/96 px-4 backdrop-blur-xl"
+    class="sticky top-0 z-10 flex h-16 w-full items-center gap-2 bg-background/10 px-4 backdrop-blur-xl"
   >
     <div
       @click="selectedFolder = 'all'"
@@ -754,6 +756,25 @@ onBeforeUnmount(saveDraft);
         type="search"
       />
     </label>
+
+    <UButton
+      variant="ghost"
+      size="icon-sm"
+      type="button"
+      :title="
+        theme === 'dark' ? 'Activer le mode clair' : 'Activer le mode sombre'
+      "
+      :aria-label="
+        theme === 'dark' ? 'Activer le mode clair' : 'Activer le mode sombre'
+      "
+      @click="toggleTheme"
+    >
+      <UIcon
+        :name="theme === 'dark' ? 'lucide:sun' : 'lucide:moon'"
+        class="size-4"
+        aria-hidden="true"
+      />
+    </UButton>
 
     <UButton
       variant="ghost"

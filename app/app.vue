@@ -3,8 +3,10 @@ import { onMounted } from "vue";
 import { useNotesStore } from "./stores/notes";
 
 const notesStore = useNotesStore();
+const { initializeTheme } = useTheme();
 
 onMounted(() => {
+  initializeTheme();
   void notesStore.initializeSync();
   void notesStore.loadCurrentUser();
 });

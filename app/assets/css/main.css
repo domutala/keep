@@ -27,6 +27,36 @@
   --radius: 0.625rem;
 }
 
+:root.dark {
+  color-scheme: dark;
+  --background: #171816;
+  --foreground: #f4f2ed;
+  --card: #22231f;
+  --card-foreground: #f4f2ed;
+  --popover: #252620;
+  --popover-foreground: #f4f2ed;
+  --primary: #f5bd3b;
+  --primary-foreground: #262521;
+  --secondary: #443919;
+  --secondary-foreground: #ffe585;
+  --muted: #2b2c27;
+  --muted-foreground: #aaa69d;
+  --accent: #443919;
+  --accent-foreground: #ffe585;
+  --destructive: #f87171;
+  --border: #3b3c36;
+  --input: #3b3c36;
+  --ring: #f5bd3b;
+  --color-canvas: #171816;
+  --color-surface: #22231f;
+  --color-ink: #f4f2ed;
+  --color-muted: #aaa69d;
+  --color-line: #3b3c36;
+  --shadow-card:
+    0 1px 2px rgb(0 0 0 / 0.18), 0 8px 24px rgb(0 0 0 / 0.2);
+  --shadow-float: 0 12px 36px rgb(0 0 0 / 0.32);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -102,6 +132,16 @@
       radial-gradient(
         circle at 8% 0%,
         rgb(255 241 184 / 0.42),
+        transparent 24rem
+      ),
+      var(--color-canvas);
+  }
+
+  :root.dark body {
+    background:
+      radial-gradient(
+        circle at 8% 0%,
+        rgb(233 169 35 / 0.1),
         transparent 24rem
       ),
       var(--color-canvas);
