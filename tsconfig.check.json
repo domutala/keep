@@ -1,0 +1,18 @@
+{
+  "extends": "./.app/tsconfig.app.json",
+  "compilerOptions": {
+    "paths": {
+      "@": ["./app"],
+      "@/*": ["./app/*"],
+      "#build": ["./.app"],
+      "#build/*": ["./.app/*"]
+    }
+  },
+  "include": ["./.app/**/*.d.ts", "./app/**/*", "./runable.config.ts"],
+  "exclude": [
+    "./app/components/ui/carousel/**/*",
+    "./app/components/ui/chart/**/*",
+    "./app/components/ui/form/**/*",
+    "./app/components/ui/line-sidebar/**/*"
+  ]
+}

@@ -5,22 +5,31 @@ import searchIcon from "@iconify-icons/lucide/search";
 import trashIcon from "@iconify-icons/lucide/trash-2";
 import { Icon } from "@iconify/vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import AppModal from "../components/AppModal.vue";
-import FolderCard from "../components/FolderCard.vue";
-import FolderSidebar from "../components/FolderSidebar.vue";
-import NoteCard from "../components/NoteCard.vue";
-import NoteEditor from "../components/NoteEditor.vue";
+import Button from "@/components/ui/button/Button.vue";
+import Input from "@/components/ui/input/Input.vue";
+import Separator from "@/components/ui/separator/Separator.vue";
+import AppModal from "../components/app/AppModal.vue";
+import FolderCard from "../components/app/FolderCard.vue";
+import FolderSidebar from "../components/app/FolderSidebar.vue";
+import NoteCard from "../components/app/NoteCard.vue";
+import NoteEditor from "../components/app/NoteEditor.vue";
 import { useNotesStore, type Folder, type Note } from "../stores/notes";
+import type { ContentItem } from "../types/index.ts";
 
 const notesStore = useNotesStore();
 const route = useRoute();
 const router = useRouter();
+const runtime = useRuntime();
+const appName = computed(() => runtime.public.appName || "Keep");
 
 const isComposerOpen = ref(false);
 const title = ref("");
 const contentHtml = ref("");
 const contentText = ref("");
 const search = ref("");
+const isAccountModalOpen = ref(false);
+const accountLoading = ref(false);
+const accountError = ref("");
 const isShareModalOpen = ref(false);
 const shareUrl = ref("");
 const copiedShareValue = ref<"link" | "session" | null>(null);
@@ -28,6 +37,9 @@ const shareError = ref("");
 const mergeSessionId = ref("");
 const mergeState = ref<"idle" | "merging" | "success" | "error">("idle");
 const mergeError = ref("");
+const userInitial = computed(
+  () => notesStore.currentUser?.name.charAt(0).toLocaleUpperCase("fr") ?? "",
+);
 const selectedFolder = computed({
   get() {
     if (route.path === "/unfiled") return "unfiled";
@@ -66,6 +78,48 @@ const newFolderName = ref("");
 const newFolderParentId = ref<string | null>(null);
 const saveState = ref<"idle" | "saving" | "saved">("idle");
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+function openAccount() {
+  if (!notesStore.currentUser) {
+    void router.push({ path: "/login", query: route.query });
+    return;
+  }
+
+  accountError.value = "";
+  isAccountModalOpen.value = true;
+}
+
+function closeAccount() {
+  if (accountLoading.value) return;
+  isAccountModalOpen.value = false;
+  accountError.value = "";
+}
+
+function openProfilePage() {
+  isAccountModalOpen.value = false;
+  void router.push({ path: "/profile", query: route.query });
+}
+
+async function openSessionFromAccount() {
+  isAccountModalOpen.value = false;
+  await nextTick();
+  openShareModal();
+}
+
+async function logoutFromAccount() {
+  if (accountLoading.value) return;
+
+  accountLoading.value = true;
+  accountError.value = "";
+  try {
+    await notesStore.logout();
+    isAccountModalOpen.value = false;
+  } catch {
+    accountError.value = "La déconnexion a échoué. Veuillez réessayer.";
+  } finally {
+    accountLoading.value = false;
+  }
+}
 
 function openShareModal() {
   shareUrl.value = notesStore.sessionShareUrl();
@@ -141,10 +195,6 @@ const displayedFolders = computed(() => {
     )
     .sort((a, b) => a.name.localeCompare(b.name, "fr"));
 });
-
-type ContentItem =
-  | { type: "folder"; folder: Folder; latestNote?: Note; date: string }
-  | { type: "note"; note: Note; date: string };
 
 function descendantFolderIds(folderId: string) {
   const ids = new Set([folderId]);
@@ -414,23 +464,26 @@ onBeforeUnmount(saveDraft);
 </script>
 
 <template>
-  <nav class="navbar sticky top-0 z-10 w-full bg-base-100/10 backdrop-blur-xl">
+  <nav
+    class="sticky top-0 z-10 flex h-16 w-full items-center gap-2 border-b bg-background/96 px-4 backdrop-blur-xl"
+  >
     <label
       for="my-drawer-4"
       aria-label="open sidebar"
-      class="btn btn-square btn-ghost drawer-button lg:hidden"
+      class="inline-flex size-9 items-center justify-center rounded-md hover:bg-accent lg:hidden"
     >
       <u-icon name="lucide:panel-left" class="inline-block size-4" />
     </label>
 
-    <div
+    <Button
+      variant="ghost"
       @click="selectedFolder = 'all'"
-      class="btn btn-ghost border-0 pl-3 mr-auto"
+      class="mr-auto px-3"
     >
       <u-icon name="lucide:lightbulb" class="size-5" />
 
-      <span class="font-semibold text-xl">Keep</span>
-    </div>
+      <span class="font-semibold text-xl">{{ appName }}</span>
+    </Button>
 
     <label
       class="relative hidden w-full max-w-md sm:block bg-surface border-transparent focus-within:border-brand-400 border rounded-lg mr-auto"
@@ -441,16 +494,48 @@ onBeforeUnmount(saveDraft);
         class="absolute top-1/2 left-4 size-4 -translate-y-1/2 text-"
         aria-hidden="true"
       />
-      <input
+      <Input
         v-model="search"
-        class="input h-11 w-full bg-transparent pr-4 pl-11 text-sm outline-none placeholder:text-muted/75 border-transparent"
+        class="h-11 w-full border-transparent bg-transparent pr-4 pl-11 shadow-none"
         placeholder="Rechercher une note…"
         type="search"
       />
     </label>
 
-    <button
-      class="btn btn-ghost btn-sm ml-2"
+    <UButton
+      variant="ghost"
+      size="sm"
+      type="button"
+      class="rounded-4xl pl-1"
+      @click="openAccount"
+    >
+      <img
+        v-if="notesStore.currentUser?.avatar"
+        :src="notesStore.currentUser.avatar"
+        alt=""
+        class="size-6 rounded-full object-cover"
+      />
+      <UIcon
+        v-else
+        :name="
+          notesStore.currentUser ? 'lucide:circle-user-round' : 'lucide:log-in'
+        "
+        class="size-4"
+        aria-hidden="true"
+      />
+      <span class="hidden max-w-40 truncate md:inline">
+        {{
+          notesStore.currentUser?.name ??
+          notesStore.currentUser?.email ??
+          "Se connecter"
+        }}
+      </span>
+    </UButton>
+
+    <Button
+      v-if="!notesStore.currentUser"
+      variant="ghost"
+      size="sm"
       type="button"
       title="Partager cette session"
       aria-label="Partager cette session"
@@ -458,7 +543,7 @@ onBeforeUnmount(saveDraft);
     >
       <UIcon name="lucide:cloud-backup" class="size-4" aria-hidden="true" />
       <span class="hidden md:inline">Session</span>
-    </button>
+    </Button>
   </nav>
 
   <main class="mx-auto max-w-[1580px] px-4 py-10 sm:px-6 sm:py-14">
@@ -477,10 +562,10 @@ onBeforeUnmount(saveDraft);
         @submit.prevent
       >
         <label class="sr-only" for="note-title">Titre de la note</label>
-        <input
+        <Input
           id="note-title"
           v-model="title"
-          class="input h-auto w-full rounded-none border-0 bg-transparent px-5 py-4 text-base font-semibold outline-none placeholder:font-normal placeholder:text-muted/70 focus:outline-none"
+          class="h-auto w-full rounded-none border-0 bg-transparent px-5 py-4 text-base font-semibold shadow-none focus-visible:ring-0"
           maxlength="120"
           :placeholder="
             isEditingExistingNote ? 'Titre de la note' : 'Titre (facultatif)'
@@ -517,9 +602,10 @@ onBeforeUnmount(saveDraft);
           </div> -->
       </form>
 
-      <button
+      <Button
         v-else-if="!isEditingExistingNote"
-        class="btn h-auto min-h-16 w-full justify-start gap-4 mt-4 rounded-card border bg-surface px-3 text-left font-normal shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-float"
+        variant="outline"
+        class="mt-4 h-auto min-h-16 w-full justify-start gap-4 rounded-card bg-surface px-3 text-left font-normal shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-float"
         type="button"
         @click="openComposer"
       >
@@ -531,7 +617,7 @@ onBeforeUnmount(saveDraft);
         <span class="text-sm font-medium text-muted">
           Créer une nouvelle note…
         </span>
-      </button>
+      </Button>
     </section>
 
     <section
@@ -540,9 +626,10 @@ onBeforeUnmount(saveDraft);
       aria-labelledby="content-title"
     >
       <div class="mb-5 flex items-end justify-between gap-4">
-        <button
+        <Button
           v-if="selectedFolder !== 'unfiled'"
-          class="btn btn-ghost btn-sm"
+          variant="ghost"
+          size="sm"
           type="button"
           @click="
             openFolderModal(selectedFolder === 'all' ? null : selectedFolder)
@@ -550,14 +637,11 @@ onBeforeUnmount(saveDraft);
         >
           <Icon :icon="plusIcon" class="size-4" aria-hidden="true" />
           Nouveau dossier
-        </button>
+        </Button>
       </div>
 
-      <div class="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
-        <template
-          v-for="item in contentItems"
-          :key="`${item.type}-${item.type === 'folder' ? item.folder.id : item.note.id}`"
-        >
+      <UGrid :items="contentItems">
+        <template #item="{ item }">
           <FolderCard
             v-if="item.type === 'folder'"
             :folder="item.folder"
@@ -574,7 +658,7 @@ onBeforeUnmount(saveDraft);
             @delete="requestNoteDeletion"
           />
         </template>
-      </div>
+      </UGrid>
     </section>
 
     <section
@@ -601,13 +685,125 @@ onBeforeUnmount(saveDraft);
   </main>
 
   <AppModal
+    :open="isAccountModalOpen"
+    title="Votre compte"
+    size="sm"
+    flush
+    hide-header
+    @close="closeAccount"
+  >
+    <div
+      v-if="notesStore.currentUser"
+      class="rounded-[1.75rem] p-3 text-foreground"
+    >
+      <div class="relative flex min-h-10 items-center justify-center px-11">
+        <Button
+          variant="ghost"
+          size="icon"
+          class="absolute top-0 right-0 rounded-full"
+          type="button"
+          aria-label="Fermer"
+          @click="closeAccount"
+        >
+          <UIcon name="lucide:x" class="size-5" aria-hidden="true" />
+        </Button>
+      </div>
+
+      <div class="px-4 pt-4 pb-6 text-center">
+        <UAvatar class="size-20 mx-auto">
+          <UAvatarImage
+            v-if="notesStore.currentUser.avatar"
+            :src="notesStore.currentUser.avatar"
+          />
+          <UAvatarFallback class="bg-muted/30 text-3xl">
+            {{ userInitial }}
+          </UAvatarFallback>
+        </UAvatar>
+
+        <h2 class="mt-4 text-xl font-medium">
+          {{ notesStore.currentUser.name }} !
+        </h2>
+        <p class="truncate text-sm">
+          {{ notesStore.currentUser.email }}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          class="mt-4 rounded-full px-5"
+          type="button"
+          @click="openProfilePage"
+        >
+          <UIcon name="lucide:user-pen" class="size-4" aria-hidden="true" />
+          Modifier le profil
+        </Button>
+      </div>
+
+      <div class="overflow-hidden rounded-3xl border">
+        <Button
+          variant="ghost"
+          class="h-auto w-full justify-start rounded-none px-5 py-4 text-left"
+          type="button"
+          @click="openSessionFromAccount"
+        >
+          <UIcon name="lucide:cloud-backup" class="size-4" aria-hidden="true" />
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm font-medium">Votre session</span>
+            <span
+              class="mt-0.5 block truncate font-mono text-xs font-normal text-muted-foreground"
+            >
+              {{ notesStore.sessionId }}
+            </span>
+          </span>
+          <UIcon
+            name="lucide:chevron-right"
+            class="size-4 text-muted-foreground"
+            aria-hidden="true"
+          />
+        </Button>
+
+        <Separator />
+
+        <Button
+          variant="ghost"
+          class="h-auto w-full justify-start rounded-none px-5 py-4 text-left text-destructive hover:bg-destructive/5 hover:text-destructive"
+          type="button"
+          :disabled="accountLoading"
+          @click="logoutFromAccount"
+        >
+          <UIcon
+            :name="accountLoading ? 'lucide:loader-circle' : 'lucide:log-out'"
+            class="size-4"
+            :class="{ 'animate-spin': accountLoading }"
+            aria-hidden="true"
+          />
+          <span class="text-sm font-medium">
+            {{ accountLoading ? "Déconnexion…" : "Se déconnecter" }}
+          </span>
+        </Button>
+      </div>
+
+      <p
+        v-if="accountError"
+        class="px-4 pt-3 text-center text-sm text-destructive"
+        role="alert"
+      >
+        {{ accountError }}
+      </p>
+
+      <p class="px-4 pt-4 pb-1 text-center text-xs text-muted-foreground">
+        Connexion sécurisée par code envoyé par e-mail
+      </p>
+    </div>
+  </AppModal>
+
+  <AppModal
     :open="isShareModalOpen"
     title="Partager cette session"
     size="lg"
     elevated
     @close="closeShareModal"
   >
-    <p class="mb-5 text-sm leading-6 text-base-content/70">
+    <p class="mb-5 text-sm leading-6 text-muted-foreground">
       Utilisez le lien sur un autre appareil ou saisissez directement
       l’identifiant de session.
     </p>
@@ -617,16 +813,16 @@ onBeforeUnmount(saveDraft);
         <label class="mb-1.5 block text-sm font-medium" for="share-link">
           Lien de partage
         </label>
-        <div class="join flex w-full">
-          <input
+        <div class="flex w-full">
+          <Input
             id="share-link"
-            class="input input-bordered join-item min-w-0 flex-1"
+            class="min-w-0 flex-1 rounded-r-none"
             :value="shareUrl"
             readonly
             @focus="$event.currentTarget.select()"
           />
-          <button
-            class="btn btn-primary join-item"
+          <Button
+            class="rounded-l-none"
             type="button"
             @click="copyShareValue('link', shareUrl)"
           >
@@ -638,7 +834,7 @@ onBeforeUnmount(saveDraft);
               aria-hidden="true"
             />
             {{ copiedShareValue === "link" ? "Copié" : "Copier" }}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -646,16 +842,17 @@ onBeforeUnmount(saveDraft);
         <label class="mb-1.5 block text-sm font-medium" for="share-session-id">
           Identifiant de session
         </label>
-        <div class="join flex w-full">
-          <input
+        <div class="flex w-full">
+          <Input
             id="share-session-id"
-            class="input input-bordered join-item min-w-0 flex-1 font-mono text-xs"
+            class="min-w-0 flex-1 rounded-r-none font-mono text-xs"
             :value="notesStore.sessionId"
             readonly
             @focus="$event.currentTarget.select()"
           />
-          <button
-            class="btn btn-outline join-item"
+          <Button
+            variant="outline"
+            class="rounded-l-none border-l-0"
             type="button"
             @click="copyShareValue('session', notesStore.sessionId)"
           >
@@ -667,36 +864,41 @@ onBeforeUnmount(saveDraft);
               aria-hidden="true"
             />
             {{ copiedShareValue === "session" ? "Copié" : "Copier" }}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div class="divider text-xs text-base-content/50">Fusionner</div>
+      <div class="flex items-center gap-3 text-xs text-muted-foreground">
+        <Separator class="flex-1" />
+        Fusionner
+        <Separator class="flex-1" />
+      </div>
 
       <form @submit.prevent="mergeSession">
         <label class="mb-1.5 block text-sm font-medium" for="merge-session-id">
           Session à fusionner
         </label>
-        <p class="mb-3 text-xs leading-5 text-base-content/60">
+        <p class="mb-3 text-xs leading-5 text-muted-foreground">
           Les notes et dossiers de cette session seront ajoutés à la session
           courante. La session source restera intacte.
         </p>
         <div class="flex flex-col gap-2 sm:flex-row">
-          <input
+          <Input
             id="merge-session-id"
             v-model="mergeSessionId"
-            class="input input-bordered min-w-0 flex-1 font-mono text-xs"
+            class="min-w-0 flex-1 font-mono text-xs"
             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
             autocomplete="off"
           />
-          <button
-            class="btn btn-secondary"
+          <Button
+            variant="secondary"
             type="submit"
             :disabled="!mergeSessionId.trim() || mergeState === 'merging'"
           >
-            <span
+            <UIcon
               v-if="mergeState === 'merging'"
-              class="loading loading-spinner loading-xs"
+              name="lucide:loader-circle"
+              class="size-4 animate-spin"
               aria-hidden="true"
             />
             <UIcon
@@ -706,27 +908,29 @@ onBeforeUnmount(saveDraft);
               aria-hidden="true"
             />
             {{ mergeState === "merging" ? "Fusion…" : "Fusionner" }}
-          </button>
+          </Button>
         </div>
         <p
           v-if="mergeState === 'success'"
-          class="mt-3 text-sm text-success"
+          class="mt-3 text-sm text-green-700"
           role="status"
         >
           Les deux sessions ont été fusionnées.
         </p>
-        <p v-if="mergeError" class="mt-3 text-sm text-error" role="alert">
+        <p v-if="mergeError" class="mt-3 text-sm text-destructive" role="alert">
           {{ mergeError }}
         </p>
       </form>
     </div>
 
-    <p v-if="shareError" class="mt-4 text-sm text-error" role="alert">
+    <p v-if="shareError" class="mt-4 text-sm text-destructive" role="alert">
       {{ shareError }}
     </p>
 
     <template #actions>
-      <button class="btn" type="button" @click="closeShareModal">Fermer</button>
+      <Button variant="outline" type="button" @click="closeShareModal"
+        >Fermer</Button
+      >
     </template>
   </AppModal>
 
@@ -745,23 +949,25 @@ onBeforeUnmount(saveDraft);
               Modifier la note
             </h2> -->
         <label class="sr-only" for="edit-note-name">Titre de la note</label>
-        <input
+        <Input
           id="edit-note-name"
           v-model="title"
-          class="input mt-1 block h-auto w-full rounded-none border-0 bg-transparent py-3 text-xl font-semibold outline-none placeholder:font-normal placeholder:text-muted/70 focus:outline-none"
+          class="mt-1 block h-auto w-full rounded-none border-0 bg-transparent py-3 text-xl font-semibold shadow-none focus-visible:ring-0"
           maxlength="120"
           placeholder="Titre de la note"
           type="text"
         />
-        <button
-          class="btn btn-circle btn-ghost btn-sm absolute top-1/2 right-4 -translate-y-1/2 text-muted hover:bg-red-50 hover:text-red-600"
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="absolute top-1/2 right-4 -translate-y-1/2 text-muted hover:bg-red-50 hover:text-red-600"
           type="button"
           aria-label="Supprimer cette note"
           title="Supprimer"
           @click="requestCurrentNoteDeletion"
         >
           <Icon :icon="trashIcon" class="size-4" aria-hidden="true" />
-        </button>
+        </Button>
       </div>
 
       <NoteEditor
@@ -785,7 +991,7 @@ onBeforeUnmount(saveDraft);
     <template #header="{ titleId, descriptionId }">
       <div class="flex items-start gap-4">
         <span
-          class="grid size-11 shrink-0 place-items-center rounded-full bg-error/10 text-error"
+          class="grid size-11 shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive"
         >
           <Icon :icon="trashIcon" class="size-5" aria-hidden="true" />
         </span>
@@ -795,7 +1001,7 @@ onBeforeUnmount(saveDraft);
           </h2>
           <p
             :id="descriptionId"
-            class="mt-2 text-sm leading-6 text-base-content/70"
+            class="mt-2 text-sm leading-6 text-muted-foreground"
           >
             <template v-if="notePendingDeletion?.title"
               >La note « {{ notePendingDeletion.title }} » sera supprimée
@@ -810,13 +1016,13 @@ onBeforeUnmount(saveDraft);
     </template>
 
     <template #actions>
-      <button class="btn btn-ghost" type="button" @click="cancelNoteDeletion">
+      <Button variant="ghost" type="button" @click="cancelNoteDeletion">
         Annuler
-      </button>
-      <button class="btn btn-error" type="button" @click="confirmNoteDeletion">
+      </Button>
+      <Button variant="destructive" type="button" @click="confirmNoteDeletion">
         <Icon :icon="trashIcon" class="size-4" aria-hidden="true" />
         Supprimer
-      </button>
+      </Button>
     </template>
   </AppModal>
 
@@ -836,17 +1042,17 @@ onBeforeUnmount(saveDraft);
     <form @submit.prevent="createFolder">
       <p
         v-if="newFolderParentName && !folderBeingRenamed"
-        class="mb-4 text-sm text-base-content/70"
+        class="mb-4 text-sm text-muted-foreground"
       >
         Dans « {{ newFolderParentName }} »
       </p>
       <label class="mb-1.5 block text-sm font-medium" for="folder-name"
         >Nom du dossier</label
       >
-      <input
+      <Input
         id="folder-name"
         v-model="newFolderName"
-        class="input input-bordered w-full"
+        class="w-full"
         maxlength="80"
         placeholder="Ex. Travail"
         type="text"
@@ -855,17 +1061,16 @@ onBeforeUnmount(saveDraft);
     </form>
 
     <template #actions>
-      <button class="btn btn-ghost" type="button" @click="closeFolderModal">
+      <Button variant="ghost" type="button" @click="closeFolderModal">
         Annuler
-      </button>
-      <button
-        class="btn btn-primary"
+      </Button>
+      <Button
         type="button"
         :disabled="!newFolderName.trim()"
         @click="createFolder"
       >
         {{ folderBeingRenamed ? "Enregistrer" : "Créer" }}
-      </button>
+      </Button>
     </template>
   </AppModal>
 
@@ -879,7 +1084,7 @@ onBeforeUnmount(saveDraft);
     <template #header="{ titleId, descriptionId }">
       <div class="flex items-start gap-4">
         <span
-          class="grid size-11 shrink-0 place-items-center rounded-full bg-error/10 text-error"
+          class="grid size-11 shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive"
         >
           <Icon :icon="trashIcon" class="size-5" aria-hidden="true" />
         </span>
@@ -889,7 +1094,7 @@ onBeforeUnmount(saveDraft);
           </h2>
           <p
             :id="descriptionId"
-            class="mt-2 text-sm leading-6 text-base-content/70"
+            class="mt-2 text-sm leading-6 text-muted-foreground"
           >
             « {{ folderPendingDeletion?.name }} » et tous ses sous-dossiers
             seront supprimés. Leurs notes seront conservées dans « Sans dossier
@@ -900,17 +1105,17 @@ onBeforeUnmount(saveDraft);
     </template>
 
     <template #actions>
-      <button class="btn btn-ghost" type="button" @click="cancelFolderDeletion">
+      <Button variant="ghost" type="button" @click="cancelFolderDeletion">
         Annuler
-      </button>
-      <button
-        class="btn btn-error"
+      </Button>
+      <Button
+        variant="destructive"
         type="button"
         @click="confirmFolderDeletion"
       >
         <Icon :icon="trashIcon" class="size-4" aria-hidden="true" />
         Supprimer
-      </button>
+      </Button>
     </template>
   </AppModal>
 </template>

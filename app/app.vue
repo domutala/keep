@@ -6,6 +6,7 @@ const notesStore = useNotesStore();
 
 onMounted(() => {
   void notesStore.initializeSync();
+  void notesStore.loadCurrentUser();
 });
 </script>
 

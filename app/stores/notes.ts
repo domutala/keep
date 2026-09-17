@@ -12,6 +12,12 @@ export interface Folder {
   createdAt: string;
 }
 
+export interface User {
+  email: string;
+  name: string;
+  avatar: string | null;
+}
+
 export interface RichTextNote extends BaseNote {
   format: "rich-text";
   contentHtml: string;
@@ -66,11 +72,123 @@ export const useNotesStore = defineStore("notes", {
     notes: [] as Note[],
     folders: [] as Folder[],
     sessionId: "",
+    currentUser: null as User | null,
     syncStatus: "idle" as "idle" | "syncing" | "synced" | "error",
     syncError: "",
   }),
 
   actions: {
+    async loadCurrentUser() {
+      if (typeof window === "undefined") return;
+      try {
+        const response = await fetch("/api/auth/me");
+        if (!response.ok) return;
+        const result = (await response.json()) as {
+          user: User | null;
+        };
+        this.currentUser = result.user;
+      } catch {
+        this.currentUser = null;
+      }
+    },
+
+    async requestLoginCode(email: string) {
+      const response = await fetch("/api/auth/request-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          throw new Error("Patientez une minute avant de demander un nouveau code.");
+        }
+        if (response.status === 503) {
+          throw new Error("L’envoi d’emails n’est pas encore configuré.");
+        }
+        throw new Error("Impossible d’envoyer le code de connexion.");
+      }
+    },
+
+    async verifyLoginCode(email: string, code: string) {
+      if (typeof window === "undefined") return;
+      this.sessionId ||= browserSessionId();
+      await this.syncToDatabase();
+
+      const response = await fetch("/api/auth/verify-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code, sessionId: this.sessionId }),
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error("Le code est incorrect ou a expiré.");
+        }
+        throw new Error("La connexion a échoué.");
+      }
+
+      const result = (await response.json()) as {
+        user: User;
+        sessionId: string;
+      };
+      this.currentUser = result.user;
+      this.sessionId = result.sessionId;
+      localStorage.setItem("keep-session-id", result.sessionId);
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("session", result.sessionId);
+      window.history.replaceState(window.history.state, "", url);
+      stateEvents?.close();
+      await this.initializeSync();
+      return result.user;
+    },
+
+    async logout() {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("La déconnexion a échoué.");
+
+      if (syncTimer) {
+        clearTimeout(syncTimer);
+        syncTimer = undefined;
+      }
+      stateEvents?.close();
+      stateEvents = undefined;
+      lastRevision = 0;
+
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("keep-session-id");
+        const url = new URL(window.location.href);
+        url.searchParams.delete("session");
+        window.history.replaceState(window.history.state, "", url);
+      }
+
+      this.$reset();
+
+      if (typeof window !== "undefined") {
+        await this.initializeSync();
+      }
+    },
+
+    async updateProfile(name: string, avatar: string | null) {
+      const response = await fetch("/api/auth/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, avatar }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          this.currentUser = null;
+          throw new Error("Votre session de connexion a expiré.");
+        }
+        throw new Error("Impossible d’enregistrer le profil.");
+      }
+
+      const result = (await response.json()) as { user: User };
+      this.currentUser = result.user;
+      return result.user;
+    },
+
     sessionShareUrl() {
       if (typeof window === "undefined") return "";
       this.sessionId ||= browserSessionId();

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="supported-color-schemes" content="light" />
+    <title>{{SUBJECT}}</title>
+  </head>
+  <body style="margin: 0; padding: 0; background: #ffffff; color: #262521">
+    <div style="display: none; max-height: 0; overflow: hidden; opacity: 0">
+      Votre code {{APP_NAME}} est {{CODE}}. Il expire dans
+      {{EXPIRES_IN_MINUTES}} minutes.
+    </div>
+    <table
+      role="presentation"
+      width="100%"
+      cellpadding="0"
+      cellspacing="0"
+      border="0"
+      style="width: 100%; background: #ffffff"
+    >
+      <tr>
+        <td align="center" style="padding: 40px 16px">
+          <table
+            role="presentation"
+            width="100%"
+            cellpadding="0"
+            cellspacing="0"
+            border="0"
+            style="width: 100%; max-width: 660px"
+          >
+            <tr>
+              <td style="padding-bottom: 24px">
+                <table
+                  role="presentation"
+                  cellpadding="0"
+                  cellspacing="0"
+                  border="0"
+                >
+                  <tr>
+                    <td valign="middle" style="width: 38px">
+                      <img
+                        src="{{LOGO_URL}}"
+                        width="38"
+                        height="38"
+                        alt="Logo {{APP_NAME}}"
+                        style="
+                          display: block;
+                          width: 38px;
+                          height: 38px;
+                          border: 0;
+                        "
+                      />
+                    </td>
+                    <td
+                      style="
+                        padding-left: 10px;
+                        color: #262521;
+                        font-family: Arial, Helvetica, sans-serif;
+                        font-size: 22px;
+                        font-weight: 700;
+                      "
+                    >
+                      {{APP_NAME}}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 20px 16px 32px">
+                <table
+                  role="presentation"
+                  width="100%"
+                  cellpadding="0"
+                  cellspacing="0"
+                  border="0"
+                >
+                  <tr>
+                    <td
+                      align="left"
+                      style="
+                        color: #262521;
+                        font-family: Arial, Helvetica, sans-serif;
+
+                        font-size: 36px;
+                        line-height: 42px;
+                        letter-spacing: -0.25px;
+                        margin-bottom: 28px;
+                        text-align: left;
+                        word-break: break-word;
+                      "
+                    >
+                      Connectez-vous à {{APP_NAME}}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td
+                      align="left"
+                      style="
+                        padding-top: 12px;
+                        font-family: Arial, Helvetica, sans-serif;
+                        font-size: 20px;
+                        line-height: 28px;
+                        letter-spacing: -0.2px;
+                        margin-bottom: 28px;
+                        word-break: break-word;
+                      "
+                    >
+                      Saisissez ce code dans l’application pour confirmer votre
+                      adresse e-mail.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td
+                      align="center"
+                      style="
+                        padding: 32px 0;
+                        color: #262521;
+                        font-family: Arial, Helvetica, sans-serif;
+                        font-size: 38px;
+                        font-weight: 700;
+                        letter-spacing: 6px;
+                        line-height: 48px;
+                      "
+                    >
+                      {{CODE}}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td
+                      align="center"
+                      style="
+                        color: #77736b;
+                        font-family: Arial, Helvetica, sans-serif;
+                        font-size: 14px;
+                        line-height: 22px;
+                      "
+                    >
+                      Ce code expire dans
+                      <strong style="color: #262521"
+                        >{{EXPIRES_IN_MINUTES}} minutes</strong
+                      >.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding-top: 28px">
+                      <table
+                        role="presentation"
+                        width="100%"
+                        cellpadding="0"
+                        cellspacing="0"
+                        border="0"
+                        style="border-radius: 14px; background: #fff8df"
+                      >
+                        <tr>
+                          <td
+                            style="
+                              padding: 14px 16px;
+                              color: #6f5514;
+                              font-family: Arial, Helvetica, sans-serif;
+                              font-size: 13px;
+                              line-height: 20px;
+                            "
+                          >
+                            <strong>Gardez ce code confidentiel.</strong>
+                            L’équipe {{APP_NAME}} ne vous demandera jamais de le
+                            communiquer.
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 24px 24px 0;
+                  color: #8b877f;
+                  font-family: Arial, Helvetica, sans-serif;
+                  font-size: 12px;
+                  line-height: 19px;
+                "
+              >
+                Vous recevez cet e-mail car une connexion à {{APP_NAME}} a été
+                demandée avec cette adresse.<br />Si ce n’était pas vous, aucune
+                action n’est nécessaire.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

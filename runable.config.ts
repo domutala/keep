@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { defineConfig } from "runable";
 
 export default defineConfig({
@@ -15,9 +16,16 @@ export default defineConfig({
 
   css: ["./app/assets/css/main.css"],
 
-  modules: ["@runablejs/pinia", "@runablejs/tailwindcss"],
+  alias: {
+    "@": join(import.meta.dirname, "./app"),
+  },
 
-  components: { dirs: "./app/components", prefix: "U" },
+  modules: ["@runablejs/pinia", "@runablejs/tailwindcss", "@runablejs/vueuse"],
+
+  components: [
+    { dirs: "./app/components/app", prefix: "U", pathPrefix: false },
+    { dirs: "./app/components/ui", prefix: "U", pathPrefix: false },
+  ],
 
   tailwindcss: {
     injectCss: false,
