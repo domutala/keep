@@ -15,6 +15,7 @@ Vue.
 - création, modification et suppression de notes ;
 - dossiers et sous-dossiers sans limite de profondeur ;
 - catégories colorées pour classer et filtrer notes et dossiers ;
+- vues grille masonry et Kanban par catégorie avec glisser-déposer ;
 - navigation par URL et fil d’Ariane ;
 - sessions anonymes partageables et fusionnables ;
 - synchronisation temps réel entre plusieurs appareils ;
@@ -31,6 +32,7 @@ Vue.
 - Fastify pour l’API HTTP ;
 - Neon/PostgreSQL pour la persistance ;
 - Tiptap pour l’éditeur de notes ;
+- Vue.Draggable/SortableJS pour la vue Kanban ;
 - shadcn-vue, Tailwind CSS et Lucide pour l’interface ;
 - Resend pour les e-mails de connexion.
 

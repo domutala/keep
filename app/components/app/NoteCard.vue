@@ -30,29 +30,35 @@ function formatDate(date: string) {
     @keydown.enter="emit('open', note)"
     @keydown.space.prevent="emit('open', note)"
   >
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      class="absolute top-3 right-3 bg-surface/90 text-muted opacity-0 shadow-sm hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100"
-      type="button"
-      :aria-label="`Supprimer la note ${note.title || 'sans titre'}`"
-      title="Supprimer"
-      @click.stop="emit('delete', note)"
-      @keydown.stop
+    <UButtonGroup
+      class="absolute top-3 right-3 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
     >
-      <UIcon name="lucide:trash-2" class="size-4" aria-hidden="true" />
-    </Button>
+      <slot name="menu-before" />
+
+      <UButton
+        variant="outline"
+        size="icon-sm"
+        type="button"
+        :aria-label="`Supprimer la note ${note.title || 'sans titre'}`"
+        title="Supprimer"
+        @click.stop="emit('delete', note)"
+        @keydown.stop
+      >
+        <UIcon name="lucide:trash-2" class="size-4" aria-hidden="true" />
+      </UButton>
+      <slot name="menu-after" />
+    </UButtonGroup>
 
     <h3 v-if="note.title" class="font-semibold leading-6">{{ note.title }}</h3>
     <div
       v-if="note.format === 'rich-text'"
-      class="note-content line-clamp-5 text-sm leading-6 text-ink/85"
+      class="note-content line-clamp-12 text-sm leading-6 text-ink/85"
       :class="{ 'mt-2': note.title }"
       v-html="note.contentHtml"
     />
     <p
       v-else
-      class="line-clamp-5 whitespace-pre-wrap text-sm leading-6 text-ink/85"
+      class="line-clamp-12 whitespace-pre-wrap text-sm leading-6 text-ink/85"
       :class="{ 'mt-2': note.title }"
     >
       {{ note.content }}

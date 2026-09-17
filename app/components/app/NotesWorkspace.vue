@@ -18,6 +18,7 @@ import Input from "@/components/ui/input/Input.vue";
 import Separator from "@/components/ui/separator/Separator.vue";
 import AppModal from "./AppModal.vue";
 import FolderCard from "./FolderCard.vue";
+import KanbanBoard from "./KanbanBoard.vue";
 import NoteCard from "./NoteCard.vue";
 import NoteEditor from "./NoteEditor.vue";
 import {
@@ -53,6 +54,26 @@ const mergeError = ref("");
 const userInitial = computed(
   () => notesStore.currentUser?.name.charAt(0).toLocaleUpperCase("fr") ?? "",
 );
+const viewMode = ref<"grid" | "kanban">(
+  route.query.view === "kanban" ? "kanban" : "grid",
+);
+
+function setViewMode(mode: "grid" | "kanban") {
+  viewMode.value = mode;
+
+  const query = { ...route.query };
+  if (mode === "kanban") query.view = "kanban";
+  else delete query.view;
+
+  void router.replace({ path: route.path, query });
+}
+
+watch(
+  () => route.query.view,
+  (view) => {
+    viewMode.value = view === "kanban" ? "kanban" : "grid";
+  },
+);
 const selectedFolder = computed({
   get() {
     if (route.path === "/unfiled") return "unfiled";
@@ -62,7 +83,9 @@ const selectedFolder = computed({
   },
   set(folderId: string) {
     const session = notesStore.sessionId || route.query.session;
-    const query = session ? { session: String(session) } : undefined;
+    const query = { ...route.query };
+    if (session) query.session = String(session);
+    else delete query.session;
 
     if (folderId === "all") {
       void router.push({ path: "/", query });
@@ -319,6 +342,7 @@ const contentItems = computed<ContentItem[]>(() => {
       type: "folder",
       folder,
       latestNote,
+      summary: folderSummary(folder.id),
       date: latestNote?.createdAt ?? folder.createdAt,
     };
   });
@@ -343,6 +367,52 @@ function folderSummary(folderId: string) {
     `${noteCount} ${noteCount > 1 ? "notes" : "note"}`,
     `${childCount} ${childCount > 1 ? "sous-dossiers" : "sous-dossier"}`,
   ].join(" · ");
+}
+
+const kanbanContentItems = computed<ContentItem[]>(() => {
+  const query = search.value.trim().toLocaleLowerCase("fr");
+  const parentId = selectedFolder.value === "all" ? null : selectedFolder.value;
+  const folders: ContentItem[] =
+    selectedFolder.value === "unfiled"
+      ? []
+      : notesStore.folders
+          .filter((folder) => folder.parentId === parentId)
+          .filter(
+            (folder) =>
+              !query || folder.name.toLocaleLowerCase("fr").includes(query),
+          )
+          .map((folder) => {
+            const latestNote = latestNoteInFolder(folder.id);
+            return {
+              type: "folder",
+              folder,
+              latestNote,
+              summary: folderSummary(folder.id),
+              date: latestNote?.createdAt ?? folder.createdAt,
+            };
+          });
+  const notes: ContentItem[] = notesStore.notes
+    .filter((note) => {
+      if (selectedFolder.value === "all") return true;
+      if (selectedFolder.value === "unfiled") return !note.folderId;
+      return note.folderId === selectedFolder.value;
+    })
+    .filter((note) => {
+      if (!query) return true;
+      const content =
+        note.format === "rich-text" ? note.contentText : note.content;
+      return `${note.title} ${content}`.toLocaleLowerCase("fr").includes(query);
+    })
+    .map((note) => ({ type: "note", note, date: note.createdAt }));
+
+  return [...folders, ...notes];
+});
+
+function updateKanbanColumn(payload: {
+  categoryId: string | null;
+  items: Array<{ type: "folder" | "note"; id: string }>;
+}) {
+  notesStore.updateKanbanColumn(payload.items, payload.categoryId);
 }
 
 async function openComposer() {
@@ -796,7 +866,11 @@ onBeforeUnmount(saveDraft);
       </Button>
     </section>
 
-    <section class="mx-auto mt-6 max-w-2xl" aria-labelledby="categories-title">
+    <section
+      v-if="viewMode === 'grid'"
+      class="mx-auto mt-6 max-w-2xl"
+      aria-labelledby="categories-title"
+    >
       <h2 id="categories-title" class="sr-only">Catégories</h2>
       <div class="flex flex-wrap items-center gap-2">
         <UButton
@@ -876,8 +950,11 @@ onBeforeUnmount(saveDraft);
     </section>
 
     <section
-      v-if="contentItems.length"
-      class="mt-14"
+      v-if="
+        contentItems.length ||
+        (viewMode === 'kanban' && categoriesSorted.length)
+      "
+      :class="viewMode === 'kanban' ? 'mt-6' : 'mt-14'"
       aria-labelledby="content-title"
     >
       <div class="mb-5 flex items-end justify-between gap-4">
@@ -920,6 +997,29 @@ onBeforeUnmount(saveDraft);
 
         <div class="mx-auto"></div>
 
+        <UButtonGroup aria-label="Mode d’affichage">
+          <Button
+            :variant="viewMode === 'grid' ? 'secondary' : 'outline'"
+            size="icon-sm"
+            type="button"
+            title="Vue grille"
+            aria-label="Vue grille"
+            @click="setViewMode('grid')"
+          >
+            <UIcon name="lucide:layout-grid" class="size-4" />
+          </Button>
+          <Button
+            :variant="viewMode === 'kanban' ? 'secondary' : 'outline'"
+            size="icon-sm"
+            type="button"
+            title="Vue Kanban"
+            aria-label="Vue Kanban"
+            @click="setViewMode('kanban')"
+          >
+            <UIcon name="lucide:columns-3" class="size-4" />
+          </Button>
+        </UButtonGroup>
+
         <Button
           v-if="selectedFolder !== 'unfiled'"
           variant="ghost"
@@ -934,7 +1034,7 @@ onBeforeUnmount(saveDraft);
         </Button>
       </div>
 
-      <UGrid :items="contentItems">
+      <UGrid v-if="viewMode === 'grid'" :items="contentItems">
         <template #item="{ item }">
           <FolderCard
             v-if="item.type === 'folder'"
@@ -955,6 +1055,18 @@ onBeforeUnmount(saveDraft);
           />
         </template>
       </UGrid>
+
+      <KanbanBoard
+        v-else
+        :items="kanbanContentItems"
+        :categories="categoriesSorted"
+        @open-folder="selectedFolder = $event.id"
+        @rename-folder="openRenameFolderModal"
+        @delete-folder="requestFolderDeletion"
+        @open-note="editNote"
+        @delete-note="requestNoteDeletion"
+        @move="updateKanbanColumn"
+      />
     </section>
 
     <section

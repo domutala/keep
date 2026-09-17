@@ -63,18 +63,20 @@ function notePreview(note: Note) {
             {{ latestNote.title }}
           </p>
           <p
-            class="line-clamp-5 whitespace-pre-wrap text-sm leading-6 text-ink/75"
+            class="line-clamp-10 whitespace-pre-wrap text-sm leading-6 text-ink/75"
             :class="{ 'mt-1': latestNote.title }"
           >
             {{ notePreview(latestNote) }}
           </p>
         </div>
 
-        <div
+        <UButtonGroup
           class="absolute top-3 right-3 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
         >
-          <Button
-            variant="ghost"
+          <slot name="menu-before" />
+
+          <UButton
+            variant="outline"
             size="icon-sm"
             type="button"
             :aria-label="`Renommer le dossier ${folder.name}`"
@@ -83,9 +85,9 @@ function notePreview(note: Note) {
             @keydown.stop
           >
             <UIcon name="lucide:pencil" class="size-4" aria-hidden="true" />
-          </Button>
-          <Button
-            variant="ghost"
+          </UButton>
+          <UButton
+            variant="outline"
             size="icon-sm"
             class="text-muted hover:bg-red-50 hover:text-red-600"
             type="button"
@@ -95,8 +97,10 @@ function notePreview(note: Note) {
             @keydown.stop
           >
             <UIcon name="lucide:trash-2" class="size-4" aria-hidden="true" />
-          </Button>
-        </div>
+          </UButton>
+
+          <slot name="menu-after" />
+        </UButtonGroup>
 
         <span
           v-if="category"

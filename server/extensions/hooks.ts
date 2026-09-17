@@ -3,6 +3,7 @@ export interface BackendStoredFolder {
   name: string;
   parentId: string | null;
   categoryId?: string | null;
+  kanbanOrder?: number;
   createdAt: string;
 }
 
@@ -12,6 +13,7 @@ export interface BackendStoredNote {
   createdAt: string;
   folderId?: string | null;
   categoryId?: string | null;
+  kanbanOrder?: number;
   format?: "rich-text";
   content?: string;
   contentHtml?: string;

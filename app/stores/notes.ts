@@ -6,6 +6,7 @@ interface BaseNote {
   createdAt: string;
   folderId?: string | null;
   categoryId?: string | null;
+  kanbanOrder?: number;
 }
 
 export interface Folder {
@@ -13,6 +14,7 @@ export interface Folder {
   name: string;
   parentId: string | null;
   categoryId?: string | null;
+  kanbanOrder?: number;
   createdAt: string;
 }
 
@@ -402,6 +404,29 @@ export const useNotesStore = defineStore("notes", {
       folder.categoryId = validCategoryId;
       this.scheduleSync();
       return true;
+    },
+
+    updateKanbanColumn(
+      items: Array<{ type: "folder" | "note"; id: string }>,
+      categoryId: string | null,
+    ) {
+      const validCategoryId = this.categories.some(
+        (category) => category.id === categoryId,
+      )
+        ? categoryId
+        : null;
+
+      items.forEach((item, kanbanOrder) => {
+        const content =
+          item.type === "note"
+            ? this.notes.find((note) => note.id === item.id)
+            : this.folders.find((folder) => folder.id === item.id);
+        if (!content) return;
+        content.categoryId = validCategoryId;
+        content.kanbanOrder = kanbanOrder;
+      });
+
+      this.scheduleSync();
     },
 
     renameFolder(folderId: string, name: string) {
