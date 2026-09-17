@@ -25,6 +25,7 @@ export interface BackendStoredCategory {
   name: string;
   color: string;
   folderId?: string | null;
+  order?: number;
   createdAt: string;
 }
 

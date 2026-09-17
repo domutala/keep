@@ -23,6 +23,7 @@ export interface Category {
   name: string;
   color: string;
   folderId?: string | null;
+  order?: number;
   createdAt: string;
 }
 
@@ -529,6 +530,17 @@ export const useNotesStore = defineStore("notes", {
         name: normalizedName,
         color: hookContext.color,
         folderId: validFolderId,
+        order: (() => {
+          const siblingCategories = this.categories.filter(
+            (category) => (category.folderId ?? null) === validFolderId,
+          );
+          return (
+            Math.max(
+              siblingCategories.length - 1,
+              ...siblingCategories.map((category) => category.order ?? -1),
+            ) + 1
+          );
+        })(),
         createdAt: new Date().toISOString(),
       };
       this.categories.push(category);
@@ -537,6 +549,16 @@ export const useNotesStore = defineStore("notes", {
       keepHooks.emit("afterCategoryCreate", { category });
 
       return id;
+    },
+
+    reorderCategories(categoryIds: string[]) {
+      const uniqueIds = [...new Set(categoryIds)];
+      uniqueIds.forEach((categoryId, order) => {
+        const category = this.categories.find((item) => item.id === categoryId);
+        if (category) category.order = order;
+      });
+
+      this.scheduleSync();
     },
 
     updateCategory(

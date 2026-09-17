@@ -31,6 +31,7 @@ const emit = defineEmits<{
       items: Array<{ type: "folder" | "note"; id: string }>;
     },
   ];
+  reorderCategories: [categoryIds: string[]];
 }>();
 
 const columns = ref<KanbanColumn[]>([]);
@@ -98,6 +99,21 @@ function emitColumn(column: KanbanColumn) {
   });
 }
 
+function emitCategoryOrder() {
+  const uncategorized = columns.value.find(
+    (column) => column.categoryId === null,
+  );
+  const categoryColumns = columns.value.filter(
+    (column) => column.categoryId !== null,
+  );
+
+  if (uncategorized) columns.value = [uncategorized, ...categoryColumns];
+  emit(
+    "reorderCategories",
+    categoryColumns.map((column) => column.categoryId!),
+  );
+}
+
 watch(() => [props.items, props.categories], rebuildColumns, {
   deep: true,
   immediate: true,
@@ -108,86 +124,103 @@ watch(() => [props.items, props.categories], rebuildColumns, {
   <div
     class="kanban-board h-[calc(100dvh-6rem)] max-h-[calc(100dvh-6rem)] overflow-x-auto overflow-y-hidden pb-5"
   >
-    <div class="flex h-full min-w-max items-stretch gap-4">
-      <section
-        v-for="column in columns"
-        :key="column.id"
-        class="flex max-h-full w-95 shrink-0 flex-col rounded-xl border bg-muted/10"
-        :aria-labelledby="`kanban-${column.id}`"
-      >
-        <header class="mb-3 flex items-center gap-2 px-3 pt-2">
-          <span
-            class="size-2.5 rounded-full"
-            :style="{ backgroundColor: column.color }"
-            aria-hidden="true"
-          />
-          <h3
-            :id="`kanban-${column.id}`"
-            class="min-w-0 flex-1 truncate text-sm font-semibold"
-          >
-            {{ column.name }}
-          </h3>
-          <span
-            class="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground"
-          >
-            {{ column.items.length }}
-          </span>
-        </header>
-
-        <Draggable
-          :list="column.items"
-          :item-key="itemKey"
-          group="keep-kanban"
-          handle=".kanban-drag-handle"
-          ghost-class="opacity-40"
-          drag-class="rotate-1"
-          class="kanban-column-scroll min-h-28 flex-1 space-y-3 overflow-y-scroll overscroll-contain rounded-lg px-1 pl-2 py-3"
-          @change="emitColumn(column)"
+    <Draggable
+      :list="columns"
+      item-key="id"
+      handle=".kanban-column-drag-handle"
+      ghost-class="opacity-40"
+      class="flex h-full min-w-max items-stretch gap-4"
+      @end="emitCategoryOrder"
+    >
+      <template #item="{ element: column }">
+        <section
+          class="flex max-h-full w-95 shrink-0 flex-col rounded-xl border bg-muted/10"
+          :aria-labelledby="`kanban-${column.id}`"
         >
-          <template #item="{ element: item }">
-            <div class="group relative">
-              <FolderCard
-                v-if="item.type === 'folder'"
-                :folder="item.folder"
-                :latest-note="item.latestNote"
-                :summary="item.summary"
-                @open="emit('openFolder', $event)"
-                @rename="emit('renameFolder', $event)"
-                @delete="emit('deleteFolder', $event)"
-              >
-                <template #menu-after>
-                  <UButton
-                    aria-label="Déplacer"
-                    variant="outline"
-                    size="icon-sm"
-                    class="kanban-drag-handle"
-                  >
-                    <UIcon name="lucide:grip-vertical" class="size-4" />
-                  </UButton>
-                </template>
-              </FolderCard>
-              <NoteCard
-                v-else
-                :note="item.note"
-                @open="emit('openNote', $event)"
-                @delete="emit('deleteNote', $event)"
-              >
-                <template #menu-after>
-                  <UButton
-                    aria-label="Déplacer"
-                    variant="outline"
-                    size="icon-sm"
-                    class="kanban-drag-handle"
-                  >
-                    <UIcon name="lucide:grip-vertical" class="size-4" />
-                  </UButton>
-                </template>
-              </NoteCard>
-            </div>
-          </template>
-        </Draggable>
-      </section>
-    </div>
+          <header class="mb-3 flex items-center gap-2 px-3 pt-2">
+            <UButton
+              v-if="column.categoryId"
+              class="kanban-column-drag-handle cursor-grab active:cursor-grabbing"
+              variant="ghost"
+              size="icon-sm"
+              type="button"
+              :aria-label="`Réordonner la catégorie ${column.name}`"
+            >
+              <UIcon name="lucide:grip-vertical" class="size-4" />
+            </UButton>
+            <span
+              class="size-2.5 rounded-full"
+              :style="{ backgroundColor: column.color }"
+              aria-hidden="true"
+            />
+            <h3
+              :id="`kanban-${column.id}`"
+              class="min-w-0 flex-1 truncate text-sm font-semibold"
+            >
+              {{ column.name }}
+            </h3>
+            <span
+              class="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground"
+            >
+              {{ column.items.length }}
+            </span>
+          </header>
+
+          <Draggable
+            :list="column.items"
+            :item-key="itemKey"
+            group="keep-kanban"
+            handle=".kanban-drag-handle"
+            ghost-class="opacity-40"
+            drag-class="rotate-1"
+            class="kanban-column-scroll min-h-28 flex-1 space-y-3 overflow-y-scroll overscroll-contain rounded-lg px-1 py-3 pl-2"
+            @change="emitColumn(column)"
+          >
+            <template #item="{ element: item }">
+              <div class="group relative">
+                <FolderCard
+                  v-if="item.type === 'folder'"
+                  :folder="item.folder"
+                  :latest-note="item.latestNote"
+                  :summary="item.summary"
+                  @open="emit('openFolder', $event)"
+                  @rename="emit('renameFolder', $event)"
+                  @delete="emit('deleteFolder', $event)"
+                >
+                  <template #menu-after>
+                    <UButton
+                      aria-label="Déplacer"
+                      variant="outline"
+                      size="icon-sm"
+                      class="kanban-drag-handle"
+                    >
+                      <UIcon name="lucide:grip-vertical" class="size-4" />
+                    </UButton>
+                  </template>
+                </FolderCard>
+                <NoteCard
+                  v-else
+                  :note="item.note"
+                  @open="emit('openNote', $event)"
+                  @delete="emit('deleteNote', $event)"
+                >
+                  <template #menu-after>
+                    <UButton
+                      aria-label="Déplacer"
+                      variant="outline"
+                      size="icon-sm"
+                      class="kanban-drag-handle"
+                    >
+                      <UIcon name="lucide:grip-vertical" class="size-4" />
+                    </UButton>
+                  </template>
+                </NoteCard>
+              </div>
+            </template>
+          </Draggable>
+        </section>
+      </template>
+    </Draggable>
   </div>
 </template>
 

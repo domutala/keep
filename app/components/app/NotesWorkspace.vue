@@ -275,7 +275,12 @@ const categoriesSorted = computed(() =>
       (category) =>
         (category.folderId ?? null) === currentCategoryFolderId.value,
     )
-    .sort((a, b) => a.name.localeCompare(b.name, "fr")),
+    .sort(
+      (a, b) =>
+        (a.order ?? Number.MAX_SAFE_INTEGER) -
+          (b.order ?? Number.MAX_SAFE_INTEGER) ||
+        a.name.localeCompare(b.name, "fr"),
+    ),
 );
 
 const categoryOptions = computed(() =>
@@ -413,6 +418,10 @@ function updateKanbanColumn(payload: {
   items: Array<{ type: "folder" | "note"; id: string }>;
 }) {
   notesStore.updateKanbanColumn(payload.items, payload.categoryId);
+}
+
+function reorderKanbanCategories(categoryIds: string[]) {
+  notesStore.reorderCategories(categoryIds);
 }
 
 async function openComposer() {
@@ -1066,6 +1075,7 @@ onBeforeUnmount(saveDraft);
         @open-note="editNote"
         @delete-note="requestNoteDeletion"
         @move="updateKanbanColumn"
+        @reorder-categories="reorderKanbanCategories"
       />
     </section>
 
