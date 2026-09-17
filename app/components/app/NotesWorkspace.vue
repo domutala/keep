@@ -1027,29 +1027,6 @@ onBeforeUnmount(saveDraft);
 
         <div class="mx-auto"></div>
 
-        <UButtonGroup aria-label="Mode d’affichage">
-          <Button
-            :variant="viewMode === 'grid' ? 'secondary' : 'outline'"
-            size="icon-sm"
-            type="button"
-            title="Vue grille"
-            aria-label="Vue grille"
-            @click="setViewMode('grid')"
-          >
-            <UIcon name="lucide:layout-grid" class="size-4" />
-          </Button>
-          <Button
-            :variant="viewMode === 'kanban' ? 'secondary' : 'outline'"
-            size="icon-sm"
-            type="button"
-            title="Vue Kanban"
-            aria-label="Vue Kanban"
-            @click="setViewMode('kanban')"
-          >
-            <UIcon name="lucide:columns-3" class="size-4" />
-          </Button>
-        </UButtonGroup>
-
         <Button
           v-if="selectedFolder !== 'unfiled'"
           variant="ghost"
@@ -1062,6 +1039,31 @@ onBeforeUnmount(saveDraft);
           <Icon :icon="plusIcon" class="size-4" aria-hidden="true" />
           Nouveau dossier
         </Button>
+
+        <UButtonGroup aria-label="Mode d’affichage">
+          <UButton
+            :class="{ 'text-primary!': viewMode === 'grid' }"
+            variant="outline"
+            size="icon-sm"
+            type="button"
+            title="Vue grille"
+            aria-label="Vue grille"
+            @click="setViewMode('grid')"
+          >
+            <UIcon name="lucide:layout-grid" class="size-4" />
+          </UButton>
+          <UButton
+            :class="{ 'text-primary!': viewMode === 'kanban' }"
+            variant="outline"
+            size="icon-sm"
+            type="button"
+            title="Vue Kanban"
+            aria-label="Vue Kanban"
+            @click="setViewMode('kanban')"
+          >
+            <UIcon name="lucide:columns-3" class="size-4" />
+          </UButton>
+        </UButtonGroup>
       </div>
 
       <UGrid v-if="viewMode === 'grid'" :items="contentItems">
