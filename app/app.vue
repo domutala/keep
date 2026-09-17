@@ -11,5 +11,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <RunablePage :key="$route.path" />
+  <RunableLayout :key="String($route.meta.layout ?? 'default')">
+    <RunablePage :key="$route.path" />
+  </RunableLayout>
 </template>

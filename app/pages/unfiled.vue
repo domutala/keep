@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import NotesPage from "./index.vue";
+import NotesWorkspace from "../components/app/NotesWorkspace.vue";
+
+definePageMeta({ layout: "notes" });
 </script>
 
 <template>
-  <NotesPage />
+  <NotesWorkspace />
 </template>
