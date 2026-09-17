@@ -1,16 +1,41 @@
+import { createCancelableHookContext, keepHooks } from "../extensions";
+
 interface BaseNote {
   id: string;
   title: string;
   createdAt: string;
   folderId?: string | null;
+  categoryId?: string | null;
 }
 
 export interface Folder {
   id: string;
   name: string;
   parentId: string | null;
+  categoryId?: string | null;
   createdAt: string;
 }
+
+export interface Category {
+  id: string;
+  name: string;
+  color: string;
+  folderId?: string | null;
+  createdAt: string;
+}
+
+export const CATEGORY_COLORS = [
+  "#f87171",
+  "#fb923c",
+  "#fbbf24",
+  "#a3e635",
+  "#34d399",
+  "#22d3ee",
+  "#60a5fa",
+  "#a78bfa",
+  "#f472b6",
+  "#94a3b8",
+];
 
 export interface User {
   email: string;
@@ -31,11 +56,12 @@ export interface LegacyNote extends BaseNote {
 
 export type Note = RichTextNote | LegacyNote;
 
-interface CreateNoteInput {
+export interface CreateNoteInput {
   title?: string;
   contentHtml: string;
   contentText: string;
   folderId?: string | null;
+  categoryId?: string | null;
 }
 
 interface RemoteState {
@@ -43,6 +69,7 @@ interface RemoteState {
   revision: number;
   notes: Note[];
   folders: Folder[];
+  categories: Category[];
 }
 
 let syncTimer: ReturnType<typeof setTimeout> | undefined;
@@ -71,6 +98,7 @@ export const useNotesStore = defineStore("notes", {
   state: () => ({
     notes: [] as Note[],
     folders: [] as Folder[],
+    categories: [] as Category[],
     sessionId: "",
     currentUser: null as User | null,
     syncStatus: "idle" as "idle" | "syncing" | "synced" | "error",
@@ -113,12 +141,25 @@ export const useNotesStore = defineStore("notes", {
     async verifyLoginCode(email: string, code: string) {
       if (typeof window === "undefined") return;
       this.sessionId ||= browserSessionId();
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        email,
+        sessionId: this.sessionId,
+      });
+      keepHooks.emit("beforeLogin", hookContext);
+      if (hookContext.canceled) {
+        throw new Error(hookContext.cancelReason ?? "La connexion a été annulée.");
+      }
+
       await this.syncToDatabase();
 
       const response = await fetch("/api/auth/verify-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code, sessionId: this.sessionId }),
+        body: JSON.stringify({
+          email: hookContext.email,
+          code,
+          sessionId: hookContext.sessionId,
+        }),
       });
       if (!response.ok) {
         if (response.status === 401) {
@@ -140,10 +181,16 @@ export const useNotesStore = defineStore("notes", {
       window.history.replaceState(window.history.state, "", url);
       stateEvents?.close();
       await this.initializeSync();
+      keepHooks.emit("login", {
+        user: result.user,
+        sessionId: result.sessionId,
+      });
       return result.user;
     },
 
     async logout() {
+      const previousUser = this.currentUser;
+      const previousSessionId = this.sessionId;
       const response = await fetch("/api/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("La déconnexion a échoué.");
 
@@ -167,13 +214,31 @@ export const useNotesStore = defineStore("notes", {
       if (typeof window !== "undefined") {
         await this.initializeSync();
       }
+
+      keepHooks.emit("logout", {
+        user: previousUser,
+        sessionId: previousSessionId,
+      });
     },
 
     async updateProfile(name: string, avatar: string | null) {
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        name,
+        avatar,
+      });
+      keepHooks.emit("beforeProfileUpdate", hookContext);
+      if (hookContext.canceled) {
+        throw new Error(hookContext.cancelReason ?? "La modification du profil a été annulée.");
+      }
+
+      const previousUser = this.currentUser ? { ...this.currentUser } : null;
       const response = await fetch("/api/auth/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, avatar }),
+        body: JSON.stringify({
+          name: hookContext.name,
+          avatar: hookContext.avatar,
+        }),
       });
 
       if (!response.ok) {
@@ -186,6 +251,10 @@ export const useNotesStore = defineStore("notes", {
 
       const result = (await response.json()) as { user: User };
       this.currentUser = result.user;
+      keepHooks.emit("afterProfileUpdate", {
+        user: result.user,
+        previousUser,
+      });
       return result.user;
     },
 
@@ -199,8 +268,19 @@ export const useNotesStore = defineStore("notes", {
     },
 
     saveNote(input: CreateNoteInput, noteId?: string) {
-      const title = input.title?.trim() ?? "";
-      const contentText = input.contentText.trim();
+      const existingNote = noteId
+        ? this.notes.find((item) => item.id === noteId)
+        : undefined;
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        input: { ...input },
+        noteId,
+        existingNote,
+      });
+      keepHooks.emit("beforeNoteSave", hookContext);
+      if (hookContext.canceled) return noteId;
+
+      const title = hookContext.input.title?.trim() ?? "";
+      const contentText = hookContext.input.contentText.trim();
 
       if (!title && !contentText) {
         return noteId;
@@ -213,28 +293,36 @@ export const useNotesStore = defineStore("notes", {
           note.title = title;
           Object.assign(note, {
             format: "rich-text" as const,
-            contentHtml: input.contentHtml,
+            contentHtml: hookContext.input.contentHtml,
             contentText,
-            folderId: input.folderId ?? null,
+            folderId: hookContext.input.folderId ?? null,
+            categoryId: hookContext.input.categoryId ?? null,
           });
           this.scheduleSync();
+          keepHooks.emit("afterNoteSave", {
+            note,
+            operation: "update",
+          });
           return noteId;
         }
       }
 
       const id = crypto.randomUUID();
 
-      this.notes.unshift({
+      const note: RichTextNote = {
         id,
         title,
         format: "rich-text",
-        contentHtml: input.contentHtml,
+        contentHtml: hookContext.input.contentHtml,
         contentText,
-        folderId: input.folderId ?? null,
+        folderId: hookContext.input.folderId ?? null,
+        categoryId: hookContext.input.categoryId ?? null,
         createdAt: new Date().toISOString(),
-      });
+      };
+      this.notes.unshift(note);
 
       this.scheduleSync();
+      keepHooks.emit("afterNoteSave", { note, operation: "create" });
 
       return id;
     },
@@ -243,46 +331,108 @@ export const useNotesStore = defineStore("notes", {
       const index = this.notes.findIndex((note) => note.id === noteId);
 
       if (index !== -1) {
+        const note = this.notes[index]!;
+        const hookContext = Object.assign(createCancelableHookContext(), {
+          note,
+        });
+        keepHooks.emit("beforeNoteDelete", hookContext);
+        if (hookContext.canceled) return false;
+
         this.notes.splice(index, 1);
         this.scheduleSync();
+        keepHooks.emit("afterNoteDelete", { note });
+        return true;
       }
+
+      return false;
     },
 
-    addFolder(name: string, parentId: string | null = null) {
-      const normalizedName = name.trim();
+    addFolder(
+      name: string,
+      parentId: string | null = null,
+      categoryId: string | null = null,
+    ) {
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        name,
+        parentId,
+      });
+      keepHooks.emit("beforeFolderCreate", hookContext);
+      if (hookContext.canceled) return;
+
+      const normalizedName = hookContext.name.trim();
       if (!normalizedName) return;
 
-      const validParentId = this.folders.some((folder) => folder.id === parentId)
-        ? parentId
+      const validParentId = this.folders.some(
+        (folder) => folder.id === hookContext.parentId,
+      )
+        ? hookContext.parentId
+        : null;
+      const validCategoryId = this.categories.some(
+        (category) => category.id === categoryId,
+      )
+        ? categoryId
         : null;
       const id = crypto.randomUUID();
 
-      this.folders.push({
+      const folder: Folder = {
         id,
         name: normalizedName,
         parentId: validParentId,
+        categoryId: validCategoryId,
         createdAt: new Date().toISOString(),
-      });
+      };
+      this.folders.push(folder);
 
       this.scheduleSync();
+      keepHooks.emit("afterFolderCreate", { folder });
 
       return id;
     },
 
-    renameFolder(folderId: string, name: string) {
-      const normalizedName = name.trim();
-      if (!normalizedName) return false;
-
+    setFolderCategory(folderId: string, categoryId: string | null) {
       const folder = this.folders.find((item) => item.id === folderId);
       if (!folder) return false;
 
-      folder.name = normalizedName;
+      const validCategoryId = this.categories.some(
+        (category) => category.id === categoryId,
+      )
+        ? categoryId
+        : null;
+
+      folder.categoryId = validCategoryId;
       this.scheduleSync();
       return true;
     },
 
+    renameFolder(folderId: string, name: string) {
+      const folder = this.folders.find((item) => item.id === folderId);
+      if (!folder) return false;
+
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        folder,
+        name,
+      });
+      keepHooks.emit("beforeFolderRename", hookContext);
+      if (hookContext.canceled) return false;
+
+      const normalizedName = hookContext.name.trim();
+      if (!normalizedName) return false;
+      const previousName = folder.name;
+      folder.name = normalizedName;
+      this.scheduleSync();
+      keepHooks.emit("afterFolderRename", { folder, previousName });
+      return true;
+    },
+
     deleteFolder(folderId: string) {
-      if (!this.folders.some((folder) => folder.id === folderId)) return [];
+      const rootFolder = this.folders.find((folder) => folder.id === folderId);
+      if (!rootFolder) return [];
+
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        folder: rootFolder,
+      });
+      keepHooks.emit("beforeFolderDelete", hookContext);
+      if (hookContext.canceled) return [];
 
       const deletedFolderIds = new Set([folderId]);
       let foundChild = true;
@@ -302,9 +452,19 @@ export const useNotesStore = defineStore("notes", {
         }
       }
 
+      const deletedFolders = this.folders.filter((folder) =>
+        deletedFolderIds.has(folder.id),
+      );
+      const unfiledNoteIds: string[] = [];
       for (const note of this.notes) {
         if (note.folderId && deletedFolderIds.has(note.folderId)) {
           note.folderId = null;
+          unfiledNoteIds.push(note.id);
+        }
+      }
+      for (const category of this.categories) {
+        if (category.folderId && deletedFolderIds.has(category.folderId)) {
+          category.folderId = null;
         }
       }
 
@@ -313,8 +473,113 @@ export const useNotesStore = defineStore("notes", {
       );
 
       this.scheduleSync();
+      keepHooks.emit("afterFolderDelete", {
+        folders: deletedFolders,
+        unfiledNoteIds,
+      });
 
       return [...deletedFolderIds];
+    },
+
+    addCategory(name: string, color: string, folderId: string | null = null) {
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        name,
+        color,
+        folderId,
+      });
+      keepHooks.emit("beforeCategoryCreate", hookContext);
+      if (hookContext.canceled) return;
+
+      const normalizedName = hookContext.name.trim();
+      if (!normalizedName) return;
+
+      const id = crypto.randomUUID();
+      const validFolderId = this.folders.some(
+        (folder) => folder.id === hookContext.folderId,
+      )
+        ? hookContext.folderId
+        : null;
+      const category: Category = {
+        id,
+        name: normalizedName,
+        color: hookContext.color,
+        folderId: validFolderId,
+        createdAt: new Date().toISOString(),
+      };
+      this.categories.push(category);
+
+      this.scheduleSync();
+      keepHooks.emit("afterCategoryCreate", { category });
+
+      return id;
+    },
+
+    updateCategory(
+      categoryId: string,
+      name: string,
+      color: string,
+      folderId: string | null = null,
+    ) {
+      const category = this.categories.find((item) => item.id === categoryId);
+      if (!category) return false;
+
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        category,
+        name,
+        color,
+        folderId,
+      });
+      keepHooks.emit("beforeCategoryUpdate", hookContext);
+      if (hookContext.canceled) return false;
+
+      const normalizedName = hookContext.name.trim();
+      if (!normalizedName) return false;
+
+      const previousName = category.name;
+      const previousColor = category.color;
+      const previousFolderId = category.folderId ?? null;
+      const validFolderId = this.folders.some(
+        (folder) => folder.id === hookContext.folderId,
+      )
+        ? hookContext.folderId
+        : null;
+      category.name = normalizedName;
+      category.color = hookContext.color;
+      category.folderId = validFolderId;
+
+      this.scheduleSync();
+      keepHooks.emit("afterCategoryUpdate", {
+        category,
+        previousName,
+        previousColor,
+        previousFolderId,
+      });
+      return true;
+    },
+
+    deleteCategory(categoryId: string) {
+      const category = this.categories.find((item) => item.id === categoryId);
+      if (!category) return false;
+
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        category,
+      });
+      keepHooks.emit("beforeCategoryDelete", hookContext);
+      if (hookContext.canceled) return false;
+
+      for (const note of this.notes) {
+        if (note.categoryId === categoryId) note.categoryId = null;
+      }
+      for (const folder of this.folders) {
+        if (folder.categoryId === categoryId) folder.categoryId = null;
+      }
+      this.categories = this.categories.filter(
+        (item) => item.id !== categoryId,
+      );
+
+      this.scheduleSync();
+      keepHooks.emit("afterCategoryDelete", { category });
+      return true;
     },
 
     scheduleSync() {
@@ -335,7 +600,11 @@ export const useNotesStore = defineStore("notes", {
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ notes: this.notes, folders: this.folders }),
+            body: JSON.stringify({
+              notes: this.notes,
+              folders: this.folders,
+              categories: this.categories,
+            }),
           },
         );
         if (!response.ok) throw new Error(`Sync failed (${response.status})`);
@@ -368,8 +637,13 @@ export const useNotesStore = defineStore("notes", {
         if (remote.exists) {
           this.notes = remote.notes;
           this.folders = remote.folders;
+          this.categories = remote.categories ?? [];
           this.syncStatus = "synced";
-        } else if (this.notes.length || this.folders.length) {
+        } else if (
+          this.notes.length ||
+          this.folders.length ||
+          this.categories.length
+        ) {
           await this.syncToDatabase();
         } else {
           this.syncStatus = "synced";
@@ -386,6 +660,7 @@ export const useNotesStore = defineStore("notes", {
           lastRevision = state.revision;
           this.notes = state.notes;
           this.folders = state.folders;
+          this.categories = state.categories ?? [];
           this.syncStatus = "synced";
         });
         stateEvents.onerror = () => {
@@ -411,13 +686,22 @@ export const useNotesStore = defineStore("notes", {
         throw new Error("Cette session est déjà la session courante.");
       }
 
+      const hookContext = Object.assign(createCancelableHookContext(), {
+        sourceSessionId: normalizedId,
+        targetSessionId: this.sessionId,
+      });
+      keepHooks.emit("beforeSessionMerge", hookContext);
+      if (hookContext.canceled) {
+        throw new Error(hookContext.cancelReason ?? "La fusion a été annulée.");
+      }
+
       await this.syncToDatabase();
       const response = await fetch("/api/state/merge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          targetSessionId: this.sessionId,
-          sourceSessionId: normalizedId,
+          targetSessionId: hookContext.targetSessionId,
+          sourceSessionId: hookContext.sourceSessionId,
         }),
       });
 
@@ -432,7 +716,15 @@ export const useNotesStore = defineStore("notes", {
       lastRevision = state.revision;
       this.notes = state.notes;
       this.folders = state.folders;
+      this.categories = state.categories ?? [];
       this.syncStatus = "synced";
+      keepHooks.emit("afterSessionMerge", {
+        sourceSessionId: hookContext.sourceSessionId,
+        targetSessionId: hookContext.targetSessionId,
+        notes: state.notes,
+        folders: state.folders,
+        categories: state.categories ?? [],
+      });
       return state;
     },
   },

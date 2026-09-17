@@ -18,10 +18,15 @@ import Input from "@/components/ui/input/Input.vue";
 import Separator from "@/components/ui/separator/Separator.vue";
 import AppModal from "./AppModal.vue";
 import FolderCard from "./FolderCard.vue";
-import FolderSidebar from "./FolderSidebar.vue";
 import NoteCard from "./NoteCard.vue";
 import NoteEditor from "./NoteEditor.vue";
-import { useNotesStore, type Folder, type Note } from "../../stores/notes";
+import {
+  CATEGORY_COLORS,
+  useNotesStore,
+  type Category,
+  type Folder,
+  type Note,
+} from "../../stores/notes";
 import type { ContentItem } from "../../types/index.ts";
 
 const notesStore = useNotesStore();
@@ -75,6 +80,8 @@ const selectedFolder = computed({
   },
 });
 const noteFolderId = ref<string | null>(null);
+const noteCategoryId = ref<string | null>(null);
+const selectedCategoryFilter = ref<string | null>(null);
 const noteEditor = ref<InstanceType<typeof NoteEditor> | null>(null);
 const currentNoteId = ref<string>();
 const isEditingExistingNote = ref(false);
@@ -84,6 +91,25 @@ const folderBeingRenamed = ref<Folder | null>(null);
 const folderPendingDeletion = ref<Folder | null>(null);
 const newFolderName = ref("");
 const newFolderParentId = ref<string | null>(null);
+const newFolderCategoryId = ref<string | null>(null);
+const newFolderCategoryValue = computed({
+  get: () => newFolderCategoryId.value ?? "__none__",
+  set: (value: string) => {
+    newFolderCategoryId.value = value === "__none__" ? null : value;
+  },
+});
+const isCategoryModalOpen = ref(false);
+const categoryBeingEdited = ref<Category | null>(null);
+const categoryPendingDeletion = ref<Category | null>(null);
+const newCategoryName = ref("");
+const newCategoryColor = ref(CATEGORY_COLORS[0]!);
+const newCategoryFolderId = ref<string | null>(null);
+const newCategoryFolderValue = computed({
+  get: () => newCategoryFolderId.value ?? "__root__",
+  set: (value: string) => {
+    newCategoryFolderId.value = value === "__root__" ? null : value;
+  },
+});
 const saveState = ref<"idle" | "saving" | "saved">("idle");
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -181,9 +207,14 @@ const filteredNotes = computed(() => {
     return note.folderId === selectedFolder.value;
   });
 
-  if (!query) return notes;
+  const categoryFiltered = notes.filter((note) => {
+    if (!selectedCategoryFilter.value) return true;
+    return note.categoryId === selectedCategoryFilter.value;
+  });
 
-  return notes.filter((note) => {
+  if (!query) return categoryFiltered;
+
+  return categoryFiltered.filter((note) => {
     const content =
       note.format === "rich-text" ? note.contentText : note.content;
     return `${note.title} ${content}`.toLocaleLowerCase("fr").includes(query);
@@ -199,10 +230,43 @@ const displayedFolders = computed(() => {
   return notesStore.folders
     .filter((folder) => folder.parentId === parentId)
     .filter(
+      (folder) =>
+        !selectedCategoryFilter.value ||
+        folder.categoryId === selectedCategoryFilter.value,
+    )
+    .filter(
       (folder) => !query || folder.name.toLocaleLowerCase("fr").includes(query),
     )
     .sort((a, b) => a.name.localeCompare(b.name, "fr"));
 });
+
+const currentCategoryFolderId = computed(() =>
+  selectedFolder.value === "all" || selectedFolder.value === "unfiled"
+    ? null
+    : selectedFolder.value,
+);
+
+const categoriesSorted = computed(() =>
+  notesStore.categories
+    .filter(
+      (category) =>
+        (category.folderId ?? null) === currentCategoryFolderId.value,
+    )
+    .sort((a, b) => a.name.localeCompare(b.name, "fr")),
+);
+
+const categoryOptions = computed(() =>
+  categoriesSorted.value.map((category) => ({
+    id: category.id,
+    label: category.name,
+    color: category.color,
+  })),
+);
+
+function categoryFor(categoryId?: string | null) {
+  if (!categoryId) return null;
+  return notesStore.categories.find((item) => item.id === categoryId) ?? null;
+}
 
 const folderBreadcrumbs = computed(() => {
   if (selectedFolder.value === "all" || selectedFolder.value === "unfiled") {
@@ -288,6 +352,7 @@ async function openComposer() {
     selectedFolder.value === "all" || selectedFolder.value === "unfiled"
       ? null
       : selectedFolder.value;
+  noteCategoryId.value = selectedCategoryFilter.value;
   saveState.value = "idle";
   isComposerOpen.value = true;
   await nextTick();
@@ -301,6 +366,7 @@ function closeComposer() {
   contentHtml.value = "";
   contentText.value = "";
   noteFolderId.value = null;
+  noteCategoryId.value = null;
   currentNoteId.value = undefined;
   isEditingExistingNote.value = false;
   saveState.value = "idle";
@@ -315,6 +381,7 @@ async function editNote(note: Note) {
   contentText.value =
     note.format === "rich-text" ? note.contentText : note.content;
   noteFolderId.value = note.folderId ?? null;
+  noteCategoryId.value = note.categoryId ?? null;
   contentHtml.value =
     note.format === "rich-text"
       ? note.contentHtml
@@ -355,6 +422,7 @@ function confirmNoteDeletion() {
     contentHtml.value = "";
     contentText.value = "";
     noteFolderId.value = null;
+    noteCategoryId.value = null;
     currentNoteId.value = undefined;
     isEditingExistingNote.value = false;
     saveState.value = "idle";
@@ -370,6 +438,7 @@ function openFolderModal(parentId: string | null) {
   folderBeingRenamed.value = null;
   newFolderParentId.value = parentId;
   newFolderName.value = "";
+  newFolderCategoryId.value = selectedCategoryFilter.value;
   isFolderModalOpen.value = true;
 }
 
@@ -377,6 +446,7 @@ function openRenameFolderModal(folder: Folder) {
   folderBeingRenamed.value = folder;
   newFolderParentId.value = folder.parentId;
   newFolderName.value = folder.name;
+  newFolderCategoryId.value = folder.categoryId ?? null;
   isFolderModalOpen.value = true;
 }
 
@@ -384,6 +454,7 @@ function closeFolderModal() {
   isFolderModalOpen.value = false;
   newFolderName.value = "";
   newFolderParentId.value = null;
+  newFolderCategoryId.value = null;
   folderBeingRenamed.value = null;
 }
 
@@ -392,12 +463,20 @@ function createFolder() {
     if (
       notesStore.renameFolder(folderBeingRenamed.value.id, newFolderName.value)
     ) {
+      notesStore.setFolderCategory(
+        folderBeingRenamed.value.id,
+        newFolderCategoryId.value,
+      );
       closeFolderModal();
     }
     return;
   }
 
-  const id = notesStore.addFolder(newFolderName.value, newFolderParentId.value);
+  const id = notesStore.addFolder(
+    newFolderName.value,
+    newFolderParentId.value,
+    newFolderCategoryId.value,
+  );
   if (!id) return;
 
   selectedFolder.value = id;
@@ -426,6 +505,81 @@ function confirmFolderDeletion() {
   }
 
   folderPendingDeletion.value = null;
+}
+
+function openCategoryModal() {
+  categoryBeingEdited.value = null;
+  newCategoryName.value = "";
+  newCategoryColor.value = CATEGORY_COLORS[0]!;
+  newCategoryFolderId.value = currentCategoryFolderId.value;
+  isCategoryModalOpen.value = true;
+}
+
+function openEditCategoryModal(category: Category) {
+  categoryBeingEdited.value = category;
+  newCategoryName.value = category.name;
+  newCategoryColor.value = category.color;
+  newCategoryFolderId.value = category.folderId ?? null;
+  isCategoryModalOpen.value = true;
+}
+
+function closeCategoryModal() {
+  isCategoryModalOpen.value = false;
+  newCategoryName.value = "";
+  newCategoryFolderId.value = null;
+  categoryBeingEdited.value = null;
+}
+
+function saveCategory() {
+  if (categoryBeingEdited.value) {
+    notesStore.updateCategory(
+      categoryBeingEdited.value.id,
+      newCategoryName.value,
+      newCategoryColor.value,
+      newCategoryFolderId.value,
+    );
+    if (
+      selectedCategoryFilter.value === categoryBeingEdited.value.id &&
+      newCategoryFolderId.value !== currentCategoryFolderId.value
+    ) {
+      selectedCategoryFilter.value = null;
+    }
+    closeCategoryModal();
+    return;
+  }
+
+  const id = notesStore.addCategory(
+    newCategoryName.value,
+    newCategoryColor.value,
+    newCategoryFolderId.value,
+  );
+  if (!id) return;
+
+  closeCategoryModal();
+}
+
+function requestCategoryDeletion(category: Category) {
+  categoryPendingDeletion.value = category;
+}
+
+function cancelCategoryDeletion() {
+  categoryPendingDeletion.value = null;
+}
+
+function confirmCategoryDeletion() {
+  const category = categoryPendingDeletion.value;
+  if (!category) return;
+
+  notesStore.deleteCategory(category.id);
+
+  if (selectedCategoryFilter.value === category.id) {
+    selectedCategoryFilter.value = null;
+  }
+  if (noteCategoryId.value === category.id) {
+    noteCategoryId.value = null;
+  }
+
+  categoryPendingDeletion.value = null;
 }
 
 const newFolderParentName = computed(
@@ -474,13 +628,14 @@ function saveDraft() {
       contentHtml: contentHtml.value,
       contentText: contentText.value,
       folderId: noteFolderId.value,
+      categoryId: noteCategoryId.value,
     },
     currentNoteId.value,
   );
   saveState.value = "saved";
 }
 
-watch([title, contentHtml, contentText, noteFolderId], () => {
+watch([title, contentHtml, contentText, noteFolderId, noteCategoryId], () => {
   if (!isComposerOpen.value) return;
 
   saveState.value = "saving";
@@ -596,7 +751,9 @@ onBeforeUnmount(saveDraft);
           ref="noteEditor"
           v-model="contentHtml"
           v-model:selected-folder="noteFolderId"
+          v-model:selected-category="noteCategoryId"
           :folders="folderOptions"
+          :categories="categoryOptions"
           @update:text="contentText = $event"
           @close="closeComposer"
         />
@@ -637,6 +794,85 @@ onBeforeUnmount(saveDraft);
           Créer une nouvelle note…
         </span>
       </Button>
+    </section>
+
+    <section class="mx-auto mt-6 max-w-2xl" aria-labelledby="categories-title">
+      <h2 id="categories-title" class="sr-only">Catégories</h2>
+      <div class="flex flex-wrap items-center gap-2">
+        <UButton
+          variant="ghost"
+          type="button"
+          class="rounded-lg border px-3 py-1.5 text-xs font-medium transition"
+          :class="
+            selectedCategoryFilter === null
+              ? 'border-transparent bg-accent text-accent-foreground'
+              : 'border-line text-muted hover:bg-'
+          "
+          @click="selectedCategoryFilter = null"
+        >
+          Toutes
+        </UButton>
+
+        <UButtonGroup
+          v-for="category in categoriesSorted"
+          :key="category.id"
+          :style="
+            selectedCategoryFilter === category.id
+              ? {
+                  backgroundColor: `${category.color}26`,
+                  color: category.color,
+                }
+              : {}
+          "
+          class="border rounded-lg"
+        >
+          <UButton
+            variant="ghost"
+            @click="selectedCategoryFilter = category.id"
+            class="rounded-none hover:bg-transparent hover:text-inherit"
+          >
+            {{ category.name }}
+          </UButton>
+          <UDropdownMenu>
+            <UDropdownMenuTrigger as-child>
+              <UButton
+                variant="ghost"
+                size="icon"
+                aria-label="More Options"
+                class="rounded-none hover:bg-transparent hover:text-inherit"
+              >
+                <UIcon name="lucide:ellipsis" />
+              </UButton>
+            </UDropdownMenuTrigger>
+            <UDropdownMenuContent align="end" class="w-52">
+              <UDropdownMenuGroup>
+                <UDropdownMenuItem @click="openEditCategoryModal(category)">
+                  <UIcon name="lucide:pen" />
+                  Modifier
+                </UDropdownMenuItem>
+
+                <UDropdownMenuItem
+                  variant="destructive"
+                  @click="requestCategoryDeletion(category)"
+                >
+                  <UIcon name="lucide:trash-2" />
+                  Supprimer
+                </UDropdownMenuItem>
+              </UDropdownMenuGroup>
+            </UDropdownMenuContent>
+          </UDropdownMenu>
+        </UButtonGroup>
+
+        <UButton
+          variant="ghost"
+          type="button"
+          class="rounded-lg border"
+          @click="openCategoryModal"
+        >
+          <Icon :icon="plusIcon" class="size-3.5" aria-hidden="true" />
+          Catégorie
+        </UButton>
+      </div>
     </section>
 
     <section
@@ -705,6 +941,7 @@ onBeforeUnmount(saveDraft);
             :folder="item.folder"
             :latest-note="item.latestNote"
             :summary="folderSummary(item.folder.id)"
+            :category="categoryFor(item.folder.categoryId)"
             @open="selectedFolder = $event.id"
             @rename="openRenameFolderModal"
             @delete="requestFolderDeletion"
@@ -712,6 +949,7 @@ onBeforeUnmount(saveDraft);
           <NoteCard
             v-else
             :note="item.note"
+            :category="categoryFor(item.note.categoryId)"
             @open="editNote"
             @delete="requestNoteDeletion"
           />
@@ -1032,7 +1270,9 @@ onBeforeUnmount(saveDraft);
         ref="noteEditor"
         v-model="contentHtml"
         v-model:selected-folder="noteFolderId"
+        v-model:selected-category="noteCategoryId"
         :folders="folderOptions"
+        :categories="categoryOptions"
         @update:text="contentText = $event"
         @close="closeComposer"
       />
@@ -1116,6 +1356,48 @@ onBeforeUnmount(saveDraft);
         type="text"
         autofocus
       />
+
+      <label
+        class="mt-4 mb-1.5 block text-sm font-medium"
+        for="folder-category"
+      >
+        Catégorie
+      </label>
+      <USelect id="folder-category" v-model="newFolderCategoryValue">
+        <USelectTrigger class="w-full">
+          <USelectValue>
+            <span
+              v-if="newFolderCategoryId"
+              class="size-2.5 shrink-0 rounded-full"
+              :style="{
+                backgroundColor: categoryFor(newFolderCategoryId)?.color,
+              }"
+              aria-hidden="true"
+            />
+            <template v-if="newFolderCategoryId">
+              {{ categoryFor(newFolderCategoryId)?.name }}
+            </template>
+            <template v-else>Sans catégorie</template>
+          </USelectValue>
+        </USelectTrigger>
+        <USelectContent>
+          <USelectGroup>
+            <USelectItem value="__none__">Sans catégorie</USelectItem>
+            <USelectItem
+              v-for="category in categoriesSorted"
+              :key="category.id"
+              :value="category.id"
+            >
+              <span
+                class="mr-1.5 inline-block size-2.5 rounded-full align-middle"
+                :style="{ backgroundColor: category.color }"
+                aria-hidden="true"
+              />
+              {{ category.name }}
+            </USelectItem>
+          </USelectGroup>
+        </USelectContent>
+      </USelect>
     </form>
 
     <template #actions>
@@ -1170,6 +1452,135 @@ onBeforeUnmount(saveDraft);
         variant="destructive"
         type="button"
         @click="confirmFolderDeletion"
+      >
+        <Icon :icon="trashIcon" class="size-4" aria-hidden="true" />
+        Supprimer
+      </Button>
+    </template>
+  </AppModal>
+
+  <AppModal
+    :open="isCategoryModalOpen"
+    :title="
+      categoryBeingEdited ? 'Modifier la catégorie' : 'Nouvelle catégorie'
+    "
+    size="sm"
+    elevated
+    @close="closeCategoryModal"
+  >
+    <form @submit.prevent="saveCategory">
+      <label class="mb-1.5 block text-sm font-medium" for="category-name">
+        Nom de la catégorie
+      </label>
+      <Input
+        id="category-name"
+        v-model="newCategoryName"
+        class="w-full"
+        maxlength="60"
+        placeholder="Ex. Travail"
+        type="text"
+        autofocus
+      />
+
+      <label
+        class="mt-4 mb-1.5 block text-sm font-medium"
+        for="category-folder"
+      >
+        Dossier
+      </label>
+      <USelect id="category-folder" v-model="newCategoryFolderValue">
+        <USelectTrigger class="w-full">
+          <USelectValue>
+            {{
+              newCategoryFolderId
+                ? folderOptions.find(
+                    (folder) => folder.id === newCategoryFolderId,
+                  )?.label
+                : "Accueil"
+            }}
+          </USelectValue>
+        </USelectTrigger>
+        <USelectContent>
+          <USelectGroup>
+            <USelectItem value="__root__">Accueil</USelectItem>
+            <USelectItem
+              v-for="folder in folderOptions"
+              :key="folder.id"
+              :value="folder.id"
+            >
+              {{ folder.label }}
+            </USelectItem>
+          </USelectGroup>
+        </USelectContent>
+      </USelect>
+
+      <p class="mt-4 mb-1.5 text-sm font-medium">Couleur</p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="color in CATEGORY_COLORS"
+          :key="color"
+          type="button"
+          class="size-7 rounded-full ring-offset-2 transition"
+          :class="{ 'ring-2 ring-ring': newCategoryColor === color }"
+          :style="{ backgroundColor: color }"
+          :aria-label="`Choisir la couleur ${color}`"
+          :aria-pressed="newCategoryColor === color"
+          @click="newCategoryColor = color"
+        />
+      </div>
+    </form>
+
+    <template #actions>
+      <Button variant="ghost" type="button" @click="closeCategoryModal">
+        Annuler
+      </Button>
+      <Button
+        type="button"
+        :disabled="!newCategoryName.trim()"
+        @click="saveCategory"
+      >
+        {{ categoryBeingEdited ? "Enregistrer" : "Créer" }}
+      </Button>
+    </template>
+  </AppModal>
+
+  <AppModal
+    :open="Boolean(categoryPendingDeletion)"
+    title="Supprimer la catégorie ?"
+    role="alertdialog"
+    elevated
+    @close="cancelCategoryDeletion"
+  >
+    <template #header="{ titleId, descriptionId }">
+      <div class="flex items-start gap-4">
+        <span
+          class="grid size-11 shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive"
+        >
+          <Icon :icon="trashIcon" class="size-5" aria-hidden="true" />
+        </span>
+        <div>
+          <h2 :id="titleId" class="text-lg font-semibold">
+            Supprimer la catégorie ?
+          </h2>
+          <p
+            :id="descriptionId"
+            class="mt-2 text-sm leading-6 text-muted-foreground"
+          >
+            « {{ categoryPendingDeletion?.name }} » sera supprimée. Les notes et
+            dossiers associés resteront, sans catégorie.
+          </p>
+        </div>
+      </div>
+    </template>
+
+    <template #actions>
+      <Button variant="ghost" type="button" @click="cancelCategoryDeletion">
+        Annuler
+      </Button>
+      <Button
+        variant="destructive"
+        type="button"
+        @click="confirmCategoryDeletion"
       >
         <Icon :icon="trashIcon" class="size-4" aria-hidden="true" />
         Supprimer

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import Button from "@/components/ui/button/Button.vue";
 import Card from "@/components/ui/card/Card.vue";
-import type { Note } from "../../stores/notes";
+import type { Category, Note } from "../../stores/notes";
 
-defineProps<{ note: Note }>();
+defineProps<{ note: Note; category?: Category | null }>();
 
 const emit = defineEmits<{
   open: [note: Note];
@@ -42,6 +42,7 @@ function formatDate(date: string) {
     >
       <UIcon name="lucide:trash-2" class="size-4" aria-hidden="true" />
     </Button>
+
     <h3 v-if="note.title" class="font-semibold leading-6">{{ note.title }}</h3>
     <div
       v-if="note.format === 'rich-text'"
@@ -56,8 +57,27 @@ function formatDate(date: string) {
     >
       {{ note.content }}
     </p>
-    <time class="mt-5 block text-xs text-muted" :datetime="note.createdAt">
-      {{ formatDate(note.createdAt) }}
-    </time>
+
+    <div class="flex items-center justify-between mt-5">
+      <span
+        v-if="category"
+        class="inline-flex max-w-full items-center gap-1.5 truncate rounded-lg px-2 py-2 text-xs font-medium w-max"
+        :style="{
+          backgroundColor: `${category.color}26`,
+          color: category.color,
+        }"
+      >
+        <span
+          class="size-1.5 shrink-0 rounded-full"
+          :style="{ backgroundColor: category.color }"
+          aria-hidden="true"
+        />
+        <span class="truncate">{{ category.name }}</span>
+      </span>
+
+      <time class="block text-xs text-muted" :datetime="note.createdAt">
+        {{ formatDate(note.createdAt) }}
+      </time>
+    </div>
   </Card>
 </template>

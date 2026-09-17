@@ -8,10 +8,20 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { resolve } from "node:path";
 import Fastify from "fastify";
 import { useRuntime } from "runable";
 import { fastify } from "runable/adapters/fastify";
+import {
+  backendHooks,
+  createBackendCancelableContext,
+  type BackendStoredCategory,
+  type BackendStoredFolder,
+  type BackendStoredNote,
+  type BackendStoredState,
+} from "./server/extensions/hooks.js";
+import { loadBackendPlugins } from "./server/extensions/loader.js";
 
 try {
   process.loadEnvFile();
@@ -25,6 +35,42 @@ function runtimeString(key: string, legacyKey?: string) {
   const value =
     runtime[key] ?? (legacyKey ? process.env[legacyKey] : undefined);
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function runtimeBoolean(key: string, legacyKey?: string) {
+  const value = runtime[key] ?? (legacyKey ? process.env[legacyKey] : undefined);
+  return value === true || value === "true" || value === "1";
+}
+
+const apiOnly =
+  process.argv.includes("--api-only") || runtimeBoolean("apiOnly", "RUN_API_ONLY");
+const configuredPort = Number(
+  runtimeString("port", "PORT") ?? process.env.RUN_PORT ?? 3000,
+);
+const port =
+  Number.isInteger(configuredPort) && configuredPort > 0
+    ? configuredPort
+    : 3000;
+
+async function assertPortAvailable(portToCheck: number) {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const probe = createServer();
+    probe.unref();
+    probe.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") {
+        rejectPromise(
+          new Error(
+            `Le port ${portToCheck} est déjà utilisé. Arrêtez l’ancienne instance de Keep ou définissez RUN_PORT avec un autre port.`,
+          ),
+        );
+        return;
+      }
+      rejectPromise(error);
+    });
+    probe.listen({ port: portToCheck, host: "localhost", exclusive: true }, () => {
+      probe.close((error) => (error ? rejectPromise(error) : resolvePromise()));
+    });
+  });
 }
 
 const databaseUrl = runtimeString("databaseUrl", "DATABASE_URL");
@@ -66,31 +112,13 @@ const loginCodeTemplateSource = loginCodeTemplatePath
     );
 let loginCodeTemplatePromise: Promise<string> | undefined;
 
-const sql = neon(databaseUrl);
-const app = Fastify({ bodyLimit: 5 * 1024 * 1024 });
+export const sql = neon(databaseUrl);
+export const app = Fastify({ bodyLimit: 5 * 1024 * 1024 });
 
-interface StoredFolder {
-  id: string;
-  name: string;
-  parentId: string | null;
-  createdAt: string;
-}
-
-interface StoredNote {
-  id: string;
-  title: string;
-  createdAt: string;
-  folderId?: string | null;
-  format?: "rich-text";
-  content?: string;
-  contentHtml?: string;
-  contentText?: string;
-}
-
-interface StoredState {
-  folders: StoredFolder[];
-  notes: StoredNote[];
-}
+type StoredFolder = BackendStoredFolder;
+type StoredNote = BackendStoredNote;
+type StoredCategory = BackendStoredCategory;
+type StoredState = BackendStoredState;
 
 interface SessionQuery {
   sessionId?: string;
@@ -290,8 +318,18 @@ async function initializeDatabase() {
       PRIMARY KEY (session_id, id)
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS keep_categories (
+      session_id uuid NOT NULL REFERENCES keep_sessions(session_id) ON DELETE CASCADE,
+      id uuid NOT NULL,
+      payload jsonb NOT NULL,
+      created_at timestamptz NOT NULL,
+      PRIMARY KEY (session_id, id)
+    )
+  `;
   await sql`CREATE INDEX IF NOT EXISTS keep_folders_session_idx ON keep_folders(session_id)`;
   await sql`CREATE INDEX IF NOT EXISTS keep_notes_session_idx ON keep_notes(session_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS keep_categories_session_idx ON keep_categories(session_id)`;
   await sql`CREATE INDEX IF NOT EXISTS keep_sessions_user_idx ON keep_sessions(user_id)`;
   await sql`
     CREATE TABLE IF NOT EXISTS keep_login_codes (
@@ -316,11 +354,13 @@ async function initializeDatabase() {
 }
 
 async function readState(sessionId: string) {
-  const [sessionRows, folderRows, noteRows] = await sql.transaction([
-    sql`SELECT revision FROM keep_sessions WHERE session_id = ${sessionId}`,
-    sql`SELECT payload FROM keep_folders WHERE session_id = ${sessionId} ORDER BY created_at`,
-    sql`SELECT payload FROM keep_notes WHERE session_id = ${sessionId} ORDER BY created_at DESC`,
-  ]);
+  const [sessionRows, folderRows, noteRows, categoryRows] =
+    await sql.transaction([
+      sql`SELECT revision FROM keep_sessions WHERE session_id = ${sessionId}`,
+      sql`SELECT payload FROM keep_folders WHERE session_id = ${sessionId} ORDER BY created_at`,
+      sql`SELECT payload FROM keep_notes WHERE session_id = ${sessionId} ORDER BY created_at DESC`,
+      sql`SELECT payload FROM keep_categories WHERE session_id = ${sessionId} ORDER BY created_at`,
+    ]);
   const session = sessionRows[0] as { revision: string | number } | undefined;
 
   return {
@@ -330,6 +370,9 @@ async function readState(sessionId: string) {
       (row) => (row as { payload: StoredFolder }).payload,
     ),
     notes: noteRows.map((row) => (row as { payload: StoredNote }).payload),
+    categories: categoryRows.map(
+      (row) => (row as { payload: StoredCategory }).payload,
+    ),
   };
 }
 
@@ -394,6 +437,17 @@ app.post<{ Body: VerifyCodeBody }>(
       !authSecret
     ) {
       return reply.code(400).send({ error: "Invalid verification request" });
+    }
+
+    const loginHookContext = Object.assign(createBackendCancelableContext(), {
+      email,
+      sessionId,
+    });
+    await backendHooks.emit("beforeLogin", loginHookContext);
+    if (loginHookContext.canceled) {
+      return reply.code(403).send({
+        error: loginHookContext.cancelReason ?? "Login canceled by extension",
+      });
     }
 
     const rows = await sql`
@@ -467,6 +521,12 @@ app.post<{ Body: VerifyCodeBody }>(
           WHERE session_id = ${sessionId}
           ON CONFLICT (session_id, id) DO NOTHING
         `,
+        sql`
+          INSERT INTO keep_categories (session_id, id, payload, created_at)
+          SELECT ${targetSessionId}, id, payload, created_at FROM keep_categories
+          WHERE session_id = ${sessionId}
+          ON CONFLICT (session_id, id) DO NOTHING
+        `,
         sql`UPDATE keep_sessions SET revision = revision + 1, updated_at = now() WHERE session_id = ${targetSessionId}`,
       );
     }
@@ -478,8 +538,17 @@ app.post<{ Body: VerifyCodeBody }>(
       VALUES (${tokenHash(token)}, ${user.id}, now() + interval '30 days')
     `;
     reply.header("Set-Cookie", authCookie(token, 60 * 60 * 24 * 30));
+    const publicUser = {
+      email: user.email,
+      name: user.name,
+      avatar: user.avatar,
+    };
+    await backendHooks.emit("afterLogin", {
+      user: publicUser,
+      sessionId: targetSessionId,
+    });
     return {
-      user: { email: user.email, name: user.name, avatar: user.avatar },
+      user: publicUser,
       sessionId: targetSessionId,
     };
   },
@@ -523,9 +592,22 @@ app.patch<{ Body: UpdateProfileBody }>(
       return reply.code(400).send({ error: "Invalid profile" });
     }
 
+    const profileHookContext = Object.assign(createBackendCancelableContext(), {
+      name,
+      avatar,
+    });
+    await backendHooks.emit("beforeProfileUpdate", profileHookContext);
+    if (profileHookContext.canceled) {
+      return reply.code(403).send({
+        error:
+          profileHookContext.cancelReason ??
+          "Profile update canceled by extension",
+      });
+    }
+
     const rows = await sql`
       UPDATE keep_users users
-      SET name = ${name}, avatar = ${avatar}
+      SET name = ${profileHookContext.name}, avatar = ${profileHookContext.avatar}
       FROM keep_auth_sessions auth
       WHERE auth.user_id = users.id
         AND auth.token_hash = ${tokenHash(token)}
@@ -537,6 +619,7 @@ app.patch<{ Body: UpdateProfileBody }>(
       | undefined;
 
     if (!user) return reply.code(401).send({ error: "Unauthorized" });
+    await backendHooks.emit("afterProfileUpdate", { user });
     return { user };
   },
 );
@@ -547,6 +630,7 @@ app.post("/api/auth/logout", async (request, reply) => {
     await sql`DELETE FROM keep_auth_sessions WHERE token_hash = ${tokenHash(token)}`;
   }
   reply.header("Set-Cookie", authCookie("", 0));
+  await backendHooks.emit("afterLogout", {});
   return { loggedOut: true };
 });
 
@@ -566,12 +650,77 @@ app.put<{ Querystring: SessionQuery; Body: StoredState }>(
       return reply.code(400).send({ error: "Invalid sessionId" });
     }
 
-    const folders = Array.isArray(request.body?.folders)
+    const folders: StoredFolder[] = Array.isArray(request.body?.folders)
       ? request.body.folders
       : [];
-    const notes = Array.isArray(request.body?.notes) ? request.body.notes : [];
+    const notes: StoredNote[] = Array.isArray(request.body?.notes)
+      ? request.body.notes
+      : [];
+    const categories: StoredCategory[] = Array.isArray(
+      request.body?.categories,
+    )
+      ? request.body.categories
+      : [];
+    const previousState = await readState(sessionId);
+    const state: StoredState = {
+      folders: [...folders],
+      notes: [...notes],
+      categories: [...categories],
+    };
+    const stateHookContext = Object.assign(createBackendCancelableContext(), {
+      sessionId,
+      state,
+      previousState,
+    });
+    await backendHooks.emit("beforeStateSave", stateHookContext);
+    if (stateHookContext.canceled) {
+      return reply.code(403).send({
+        error:
+          stateHookContext.cancelReason ?? "State save canceled by extension",
+      });
+    }
+    const stateToSave = stateHookContext.state;
+
+    const previousNotes = new Map(
+      previousState.notes.map((note) => [note.id, note]),
+    );
+    const changedNotes: Array<{
+      note: StoredNote;
+      operation: "create" | "update";
+    }> = [];
+    const acceptedNotes: StoredNote[] = [];
+    for (const note of stateToSave.notes) {
+      const previousNote = previousNotes.get(note.id);
+      if (previousNote && JSON.stringify(previousNote) === JSON.stringify(note)) {
+        acceptedNotes.push(note);
+        continue;
+      }
+
+      const noteHookContext = Object.assign(createBackendCancelableContext(), {
+        sessionId,
+        note,
+        previousNote,
+      });
+      await backendHooks.emit("beforeNoteSave", noteHookContext);
+      if (noteHookContext.canceled) {
+        if (previousNote) acceptedNotes.push(previousNote);
+        continue;
+      }
+
+      acceptedNotes.push(noteHookContext.note);
+      changedNotes.push({
+        note: noteHookContext.note,
+        operation: previousNote ? "update" : "create",
+      });
+    }
+    stateToSave.notes = acceptedNotes;
+
     if (
-      [...folders, ...notes].some(
+      [
+        ...stateToSave.folders,
+        ...stateToSave.notes,
+        ...stateToSave.categories,
+      ].some(
         (item) =>
           !item ||
           !validSessionId(item.id) ||
@@ -585,20 +734,37 @@ app.put<{ Querystring: SessionQuery; Body: StoredState }>(
       sql`INSERT INTO keep_sessions (session_id) VALUES (${sessionId}) ON CONFLICT (session_id) DO NOTHING`,
       sql`DELETE FROM keep_notes WHERE session_id = ${sessionId}`,
       sql`DELETE FROM keep_folders WHERE session_id = ${sessionId}`,
-      ...folders.map(
+      sql`DELETE FROM keep_categories WHERE session_id = ${sessionId}`,
+      ...stateToSave.folders.map(
         (folder) =>
           sql`INSERT INTO keep_folders (session_id, id, payload, created_at) VALUES (${sessionId}, ${folder.id}, ${JSON.stringify(folder)}::jsonb, ${folder.createdAt}::timestamptz)`,
       ),
-      ...notes.map(
+      ...stateToSave.notes.map(
         (note) =>
           sql`INSERT INTO keep_notes (session_id, id, payload, created_at) VALUES (${sessionId}, ${note.id}, ${JSON.stringify(note)}::jsonb, ${note.createdAt}::timestamptz)`,
+      ),
+      ...stateToSave.categories.map(
+        (category) =>
+          sql`INSERT INTO keep_categories (session_id, id, payload, created_at) VALUES (${sessionId}, ${category.id}, ${JSON.stringify(category)}::jsonb, ${category.createdAt}::timestamptz)`,
       ),
       sql`UPDATE keep_sessions SET revision = revision + 1, updated_at = now() WHERE session_id = ${sessionId} RETURNING revision`,
     ];
 
     const results = await sql.transaction(queries);
     const revisionRows = results.at(-1) as Array<{ revision: string | number }>;
-    return { revision: Number(revisionRows[0]?.revision ?? 0) };
+    const revision = Number(revisionRows[0]?.revision ?? 0);
+    for (const changedNote of changedNotes) {
+      await backendHooks.emit("afterNoteSave", {
+        sessionId,
+        ...changedNote,
+      });
+    }
+    await backendHooks.emit("afterStateSave", {
+      sessionId,
+      state: stateToSave,
+      revision,
+    });
+    return { revision };
   },
 );
 
@@ -614,37 +780,70 @@ app.post<{ Body: MergeSessionsBody }>(
       return reply.code(400).send({ error: "Invalid session IDs" });
     }
 
+    const mergeHookContext = Object.assign(createBackendCancelableContext(), {
+      targetSessionId,
+      sourceSessionId,
+    });
+    await backendHooks.emit("beforeSessionMerge", mergeHookContext);
+    if (mergeHookContext.canceled) {
+      return reply.code(403).send({
+        error:
+          mergeHookContext.cancelReason ??
+          "Session merge canceled by extension",
+      });
+    }
+    if (
+      !validSessionId(mergeHookContext.targetSessionId) ||
+      !validSessionId(mergeHookContext.sourceSessionId) ||
+      mergeHookContext.targetSessionId === mergeHookContext.sourceSessionId
+    ) {
+      return reply.code(400).send({ error: "Invalid session IDs" });
+    }
+
     const sourceRows = await sql`
-      SELECT 1 FROM keep_sessions WHERE session_id = ${sourceSessionId}
+      SELECT 1 FROM keep_sessions WHERE session_id = ${mergeHookContext.sourceSessionId}
     `;
     if (!sourceRows.length) {
       return reply.code(404).send({ error: "Source session not found" });
     }
 
     await sql.transaction([
-      sql`INSERT INTO keep_sessions (session_id) VALUES (${targetSessionId}) ON CONFLICT (session_id) DO NOTHING`,
+      sql`INSERT INTO keep_sessions (session_id) VALUES (${mergeHookContext.targetSessionId}) ON CONFLICT (session_id) DO NOTHING`,
       sql`
         INSERT INTO keep_folders (session_id, id, payload, created_at)
-        SELECT ${targetSessionId}, id, payload, created_at
+        SELECT ${mergeHookContext.targetSessionId}, id, payload, created_at
         FROM keep_folders
-        WHERE session_id = ${sourceSessionId}
+        WHERE session_id = ${mergeHookContext.sourceSessionId}
         ON CONFLICT (session_id, id) DO NOTHING
       `,
       sql`
         INSERT INTO keep_notes (session_id, id, payload, created_at)
-        SELECT ${targetSessionId}, id, payload, created_at
+        SELECT ${mergeHookContext.targetSessionId}, id, payload, created_at
         FROM keep_notes
-        WHERE session_id = ${sourceSessionId}
+        WHERE session_id = ${mergeHookContext.sourceSessionId}
+        ON CONFLICT (session_id, id) DO NOTHING
+      `,
+      sql`
+        INSERT INTO keep_categories (session_id, id, payload, created_at)
+        SELECT ${mergeHookContext.targetSessionId}, id, payload, created_at
+        FROM keep_categories
+        WHERE session_id = ${mergeHookContext.sourceSessionId}
         ON CONFLICT (session_id, id) DO NOTHING
       `,
       sql`
         UPDATE keep_sessions
         SET revision = revision + 1, updated_at = now()
-        WHERE session_id = ${targetSessionId}
+        WHERE session_id = ${mergeHookContext.targetSessionId}
       `,
     ]);
 
-    return readState(targetSessionId);
+    const state = await readState(mergeHookContext.targetSessionId);
+    await backendHooks.emit("afterSessionMerge", {
+      targetSessionId: mergeHookContext.targetSessionId,
+      sourceSessionId: mergeHookContext.sourceSessionId,
+      state,
+    });
+    return state;
   },
 );
 
@@ -690,8 +889,24 @@ app.get<{ Querystring: SessionQuery }>(
   },
 );
 
+await assertPortAvailable(port);
+const loadedBackendPlugins = await loadBackendPlugins({
+  app,
+  sql,
+  hooks: backendHooks,
+  apiOnly,
+  runtime,
+});
 await initializeDatabase();
-await app.register(fastify());
 
-await app.listen({ port: 3000 });
-console.log("Listening on http://localhost:3000");
+if (!apiOnly) {
+  await app.register(fastify());
+}
+
+await app.listen({ port });
+console.log(
+  `${apiOnly ? "Keep API" : "Keep"} listening on http://localhost:${port}`,
+);
+if (loadedBackendPlugins.length) {
+  console.log(`Backend plugins: ${loadedBackendPlugins.join(", ")}`);
+}

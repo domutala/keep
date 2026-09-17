@@ -2,12 +2,13 @@
 import Button from "@/components/ui/button/Button.vue";
 import Card from "@/components/ui/card/Card.vue";
 import CardContent from "@/components/ui/card/CardContent.vue";
-import type { Folder, Note } from "../../stores/notes";
+import type { Category, Folder, Note } from "../../stores/notes";
 
 const props = defineProps<{
   folder: Folder;
   latestNote?: Note;
   summary: string;
+  category?: Category | null;
 }>();
 
 const emit = defineEmits<{
@@ -96,6 +97,22 @@ function notePreview(note: Note) {
             <UIcon name="lucide:trash-2" class="size-4" aria-hidden="true" />
           </Button>
         </div>
+
+        <span
+          v-if="category"
+          class="inline-flex max-w-full items-center gap-1.5 truncate rounded-lg px-2 py-2 text-xs font-medium w-max mt-5"
+          :style="{
+            backgroundColor: `${category.color}26`,
+            color: category.color,
+          }"
+        >
+          <span
+            class="size-1.5 shrink-0 rounded-full"
+            :style="{ backgroundColor: category.color }"
+            aria-hidden="true"
+          />
+          <span class="truncate">{{ category.name }}</span>
+        </span>
       </CardContent>
     </Card>
   </article>

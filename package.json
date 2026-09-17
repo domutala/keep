@@ -4,12 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch server.ts",
+    "dev:api": "tsx watch server.ts --api-only",
+    "start:api": "tsx server.ts --api-only",
     "build": "runable build",
     "prebuild": "runable build",
     "preprepare": "runable prepare",
     "app:build": "runable build",
     "app:prepare": "runable prepare",
-    "typecheck": "tsc -p tsconfig.check.json"
+    "typecheck": "tsc -p tsconfig.check.json",
+    "typecheck:server": "tsc -p tsconfig.server.json"
   },
   "dependencies": {
     "@iconify-icons/lucide": "^2.0.8",
