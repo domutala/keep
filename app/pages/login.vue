@@ -107,6 +107,22 @@ function handleCodeInput(value: string) {
   error.value = "";
   if (value.length < 6) lastSubmittedCode.value = "";
 }
+
+function handleOtpPaste(event: ClipboardEvent) {
+  const clipboardValue = event.clipboardData?.getData("text") ?? "";
+  const pin = clipboardValue.replace(/\D/g, "").slice(0, 6);
+
+  if (!pin) return;
+
+  event.preventDefault();
+  error.value = "";
+  lastSubmittedCode.value = "";
+  setFieldValue("pin", pin);
+
+  if (pin.length === 6) {
+    void submitCode(pin);
+  }
+}
 </script>
 
 <template>
@@ -248,6 +264,7 @@ function handleCodeInput(value: string) {
                     autofocus
                     @complete="verifyCompletedCode"
                     @input="handleCodeInput"
+                    @paste.capture="handleOtpPaste"
                   >
                     <UInputOTPGroup>
                       <UInputOTPSlot

@@ -5,6 +5,14 @@ import searchIcon from "@iconify-icons/lucide/search";
 import trashIcon from "@iconify-icons/lucide/trash-2";
 import { Icon } from "@iconify/vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import Button from "@/components/ui/button/Button.vue";
 import Input from "@/components/ui/input/Input.vue";
 import Separator from "@/components/ui/separator/Separator.vue";
@@ -194,6 +202,26 @@ const displayedFolders = computed(() => {
       (folder) => !query || folder.name.toLocaleLowerCase("fr").includes(query),
     )
     .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+});
+
+const folderBreadcrumbs = computed(() => {
+  if (selectedFolder.value === "all" || selectedFolder.value === "unfiled") {
+    return [];
+  }
+
+  const breadcrumbs: Folder[] = [];
+  const visited = new Set<string>();
+  let folderId: string | null = selectedFolder.value;
+
+  while (folderId && !visited.has(folderId)) {
+    visited.add(folderId);
+    const folder = notesStore.folders.find((item) => item.id === folderId);
+    if (!folder) break;
+    breadcrumbs.unshift(folder);
+    folderId = folder.parentId;
+  }
+
+  return breadcrumbs;
 });
 
 function descendantFolderIds(folderId: string) {
@@ -465,7 +493,7 @@ onBeforeUnmount(saveDraft);
 
 <template>
   <nav
-    class="sticky top-0 z-10 flex h-16 w-full items-center gap-2 border-b bg-background/96 px-4 backdrop-blur-xl"
+    class="sticky top-0 z-10 flex h-16 w-full items-center gap-2 bg-background/96 px-4 backdrop-blur-xl"
   >
     <div
       @click="selectedFolder = 'all'"
@@ -537,15 +565,15 @@ onBeforeUnmount(saveDraft);
     </Button>
   </nav>
 
-  <main class="w-full min-w-0 px-4 py-10 sm:px-6 sm:py-14">
+  <main class="w-full min-w-0 px-4 py-5 sm:px-6">
     <section class="mx-auto max-w-2xl">
-      <p class="mb-2 text-sm font-medium text-brand-700">Bonjour 👋</p>
+      <!-- <p class="mb-2 text-sm font-medium text-brand-700">Bonjour 👋</p>
       <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">
         Qu’avez-vous en tête ?
       </h1>
       <p class="mt-3 text-muted">
         Capturez une idée, une tâche ou quelque chose à ne pas oublier.
-      </p>
+      </p> -->
 
       <form
         v-if="isComposerOpen && !isEditingExistingNote"
@@ -617,6 +645,45 @@ onBeforeUnmount(saveDraft);
       aria-labelledby="content-title"
     >
       <div class="mb-5 flex items-end justify-between gap-4">
+        <Breadcrumb v-if="selectedFolder !== 'all'" class="ml-2">
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink as-child>
+                <button type="button" @click="selectedFolder = 'all'">
+                  Accueil
+                </button>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+
+            <template v-if="selectedFolder === 'unfiled'">
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>Sans dossier</BreadcrumbPage>
+              </BreadcrumbItem>
+            </template>
+
+            <template
+              v-for="(folder, index) in folderBreadcrumbs"
+              v-else
+              :key="folder.id"
+            >
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage v-if="index === folderBreadcrumbs.length - 1">
+                  {{ folder.name }}
+                </BreadcrumbPage>
+                <BreadcrumbLink v-else as-child>
+                  <button type="button" @click="selectedFolder = folder.id">
+                    {{ folder.name }}
+                  </button>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+            </template>
+          </BreadcrumbList>
+        </Breadcrumb>
+
+        <div class="mx-auto"></div>
+
         <Button
           v-if="selectedFolder !== 'unfiled'"
           variant="ghost"
@@ -805,10 +872,10 @@ onBeforeUnmount(saveDraft);
           Lien de partage
         </label>
         <div class="flex w-full">
-          <Input
+          <UInput
             id="share-link"
             class="min-w-0 flex-1 rounded-r-none"
-            :value="shareUrl"
+            :model-value="shareUrl"
             readonly
             @focus="$event.currentTarget.select()"
           />
@@ -834,10 +901,10 @@ onBeforeUnmount(saveDraft);
           Identifiant de session
         </label>
         <div class="flex w-full">
-          <Input
+          <UInput
             id="share-session-id"
             class="min-w-0 flex-1 rounded-r-none font-mono text-xs"
-            :value="notesStore.sessionId"
+            :model-value="notesStore.sessionId"
             readonly
             @focus="$event.currentTarget.select()"
           />
